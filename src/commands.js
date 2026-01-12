@@ -6,10 +6,11 @@
  * Handles keyboard input and modifies framework state
  */
 class CommandExecutor {
-    constructor(framework, paletteManager, renderer = null) {
+    constructor(framework, paletteManager, renderer = null, commandTree = null) {
         this.framework = framework;
         this.palette = paletteManager;
         this.renderer = renderer; // Optional: for view switching
+        this.commandTree = commandTree; // Optional: for command tree navigation
         this.lastCommand = '';
     }
 
@@ -18,6 +19,11 @@ class CommandExecutor {
      */
     executeKey(key) {
         const fw = this.framework;
+
+        // If command tree is enabled and we're in command context mode
+        if (this.commandTree && this.commandTree.inCommandContext) {
+            return this.handleCommandContextNavigation(key);
+        }
 
         // Mode-dependent commands (ijkl)
         if (fw.mode === 'translate') {
@@ -63,6 +69,7 @@ class CommandExecutor {
 
             // Duplication
             case 'd':
+            case 'D':
                 this.duplicateSelected();
                 break;
 
@@ -118,9 +125,28 @@ class CommandExecutor {
                 this.snapSelectionToCursor();
                 break;
 
+            // Delete
+            case 'x':
+                this.deleteSelected();
+                break;
+
             // Color
             case 'p':
                 this.cycleColorForward();
+                break;
+
+            // Command context (undo/fork navigation)
+            case 'u':
+                if (this.commandTree) {
+                    this.commandTree.toggleCommandContext();
+                    // Reset mode when entering command context
+                    if (this.commandTree.inCommandContext) {
+                        fw.mode = 'normal';
+                        console.log('Entered command context - mode reset to normal');
+                    }
+                } else {
+                    console.log('Command tree not enabled');
+                }
                 break;
 
             // Views (0 = spatial, 1-6 = orthographic)
@@ -147,6 +173,11 @@ class CommandExecutor {
         // Record command
         this.lastCommand = key;
         fw.commandHistory.push(key);
+
+        // Add to command tree if enabled
+        if (this.commandTree && !this.commandTree.inCommandContext) {
+            this.commandTree.addCommand(key);
+        }
     }
 
     /**
@@ -225,6 +256,11 @@ class CommandExecutor {
         });
 
         fw.commandHistory.push(key);
+
+        // Add to command tree if enabled
+        if (this.commandTree && !this.commandTree.inCommandContext) {
+            this.commandTree.addCommand(key);
+        }
     }
 
     /**
@@ -304,6 +340,24 @@ class CommandExecutor {
     }
 
     /**
+     * Delete all selected frames
+     */
+    deleteSelected() {
+        const fw = this.framework;
+        const selected = fw.getSelectedFrames();
+
+        if (selected.length === 0) {
+            console.log('No frames selected');
+            return;
+        }
+
+        // Remove selected frames from the framework
+        fw.frames = fw.frames.filter(frame => !frame.selected);
+
+        console.log('Deleted', selected.length, 'frames');
+    }
+
+    /**
      * Rotate selected frames around cursor
      * Rotation axis depends on the active view plane
      */
@@ -344,31 +398,111 @@ class CommandExecutor {
     }
 
     /**
-     * Reflect selected frames horizontally around cursor
+     * Reflect selected frames horizontally (left/right) around cursor
+     * View-relative: reflects across a vertical PLANE passing through cursor
      */
     reflectSelectedH() {
         const fw = this.framework;
         const selected = fw.getSelectedFrames();
+        const view = fw.currentView;
+
+        // Determine which axis coordinate to flip based on view
+        // e = horizontal reflection (across a vertical plane in the view)
+        // View 1/3: reflect across YZ plane (flip X)
+        // View 2/4: reflect across XY plane (flip Z)
+        // View 5/6: reflect across YZ plane (flip X)
+        let reflectAxis;
+        switch (view) {
+            case 0: // Spatial - default to front view
+            case 1: // Front (XY plane) - reflect across YZ plane (flip X)
+            case 3: // Back (XY plane) - reflect across YZ plane (flip X)
+                reflectAxis = 'x';
+                break;
+            case 2: // Right (YZ plane) - reflect across XY plane (flip Z)
+            case 4: // Left (YZ plane) - reflect across XY plane (flip Z)
+                reflectAxis = 'z';
+                break;
+            case 5: // Top (XZ plane) - reflect across YZ plane (flip X)
+            case 6: // Bottom (XZ plane) - reflect across YZ plane (flip X)
+                reflectAxis = 'x';
+                break;
+            default:
+                reflectAxis = 'x';
+        }
 
         selected.forEach(frame => {
-            frame.reflectH(fw.cursor.x, fw.cursor.y);
+            switch (reflectAxis) {
+                case 'x':
+                    // Reflect position across YZ plane
+                    const dx = frame.x - fw.cursor.x;
+                    frame.x = fw.cursor.x - dx;
+                    // Reflect normal vector (flip X component)
+                    frame.ihat = -frame.ihat;
+                    break;
+                case 'z':
+                    // Reflect position across XY plane
+                    const dz = frame.z - fw.cursor.z;
+                    frame.z = fw.cursor.z - dz;
+                    // Reflect normal vector (flip Z component)
+                    frame.khat = -frame.khat;
+                    break;
+            }
         });
 
-        console.log('Reflected', selected.length, 'frames horizontally');
+        console.log('Reflected', selected.length, 'frames horizontally across', reflectAxis, 'coordinate at cursor');
     }
 
     /**
-     * Reflect selected frames vertically around cursor
+     * Reflect selected frames vertically (up/down) around cursor
+     * View-relative: reflects across a horizontal PLANE passing through cursor
      */
     reflectSelectedV() {
         const fw = this.framework;
         const selected = fw.getSelectedFrames();
+        const view = fw.currentView;
+
+        // Determine which axis coordinate to flip based on view
+        // E = vertical reflection (across a horizontal plane in the view)
+        // View 1/3: reflect across XZ plane (flip Y)
+        // View 2/4: reflect across XZ plane (flip Y)
+        // View 5/6: reflect across XY plane (flip Z)
+        let reflectAxis;
+        switch (view) {
+            case 0: // Spatial - default to front view
+            case 1: // Front (XY plane) - reflect across XZ plane (flip Y)
+            case 2: // Right (YZ plane) - reflect across XZ plane (flip Y)
+            case 3: // Back (XY plane) - reflect across XZ plane (flip Y)
+            case 4: // Left (YZ plane) - reflect across XZ plane (flip Y)
+                reflectAxis = 'y';
+                break;
+            case 5: // Top (XZ plane) - reflect across XY plane (flip Z)
+            case 6: // Bottom (XZ plane) - reflect across XY plane (flip Z)
+                reflectAxis = 'z';
+                break;
+            default:
+                reflectAxis = 'y';
+        }
 
         selected.forEach(frame => {
-            frame.reflectV(fw.cursor.x, fw.cursor.y);
+            switch (reflectAxis) {
+                case 'y':
+                    // Reflect position across XZ plane
+                    const dy = frame.y - fw.cursor.y;
+                    frame.y = fw.cursor.y - dy;
+                    // Reflect normal vector (flip Y component)
+                    frame.jhat = -frame.jhat;
+                    break;
+                case 'z':
+                    // Reflect position across XY plane
+                    const dz = frame.z - fw.cursor.z;
+                    frame.z = fw.cursor.z - dz;
+                    // Reflect normal vector (flip Z component)
+                    frame.khat = -frame.khat;
+                    break;
+            }
         });
 
-        console.log('Reflected', selected.length, 'frames vertically');
+        console.log('Reflected', selected.length, 'frames vertically across', reflectAxis, 'coordinate at cursor');
     }
 
     /**
@@ -464,6 +598,12 @@ class CommandExecutor {
         });
 
         fw.commandHistory.push(key);
+
+        // Add to command tree if enabled
+        if (this.commandTree && !this.commandTree.inCommandContext) {
+            this.commandTree.addCommand(key);
+        }
+
         console.log('Scaled frames by', scaleFactor);
     }
 
@@ -510,6 +650,12 @@ class CommandExecutor {
         });
 
         fw.commandHistory.push(key);
+
+        // Add to command tree if enabled
+        if (this.commandTree && !this.commandTree.inCommandContext) {
+            this.commandTree.addCommand(key);
+        }
+
         console.log('Scaled entire selection by', scaleFactor);
     }
 
@@ -577,6 +723,12 @@ class CommandExecutor {
         // Move cursor
         fw.cursor.translate(dx, dy, dz);
         fw.commandHistory.push(key);
+
+        // Add to command tree if enabled
+        if (this.commandTree && !this.commandTree.inCommandContext) {
+            this.commandTree.addCommand(key);
+        }
+
         console.log('Cursor moved to', fw.cursor.x, fw.cursor.y, fw.cursor.z);
     }
 
@@ -608,6 +760,194 @@ class CommandExecutor {
     executeCommandString(cmdString) {
         for (let i = 0; i < cmdString.length; i++) {
             this.executeKey(cmdString[i]);
+        }
+    }
+
+    /**
+     * Handle command context navigation (ijkl in command context mode)
+     */
+    handleCommandContextNavigation(key) {
+        const tree = this.commandTree;
+        const fw = this.framework;
+
+        // Check if this is a navigation key
+        const isNavKey = ['i', 'j', 'k', 'l'].includes(key);
+
+        if (!isNavKey) {
+            // Non-navigation key pressed in command context
+            // Check if this matches the next command in history
+            const nextCmd = tree.peekNextCommand();
+
+            if (key === nextCmd) {
+                // Continue along current branch
+                tree.moveForward();
+                tree.exitCommandContext();
+
+                // Execute the command normally
+                fw.mode = 'normal'; // Ensure we're in normal mode
+                this.executeKeyNormal(key);
+            } else {
+                // Different command - create fork and exit command context
+                tree.exitCommandContext();
+                tree.addCommand(key);
+
+                // Reconstruct state from new branch
+                this.reconstructState();
+
+                // Execute the new command
+                fw.mode = 'normal';
+                this.executeKeyNormal(key);
+            }
+            return;
+        }
+
+        // Handle navigation
+        switch (key) {
+            case 'j': // Move back in history
+                tree.moveBack();
+                this.reconstructState();
+                break;
+
+            case 'l': // Move forward in history
+                tree.moveForward();
+                this.reconstructState();
+                break;
+
+            case 'i': // Move up to older branch
+                tree.moveUp();
+                this.reconstructState();
+                break;
+
+            case 'k': // Move down to newer branch
+                tree.moveDown();
+                this.reconstructState();
+                break;
+        }
+    }
+
+    /**
+     * Reconstruct framework state from current command tree position
+     * Clears the framework and replays commands from the start
+     */
+    reconstructState() {
+        const cmdSequence = this.commandTree.getCurrentCommandSequence();
+
+        console.log('Reconstructing state from', cmdSequence.length, 'commands');
+
+        // Clear the framework
+        this.framework.clear();
+
+        // Reset the palette to ensure consistent colors
+        this.palette.reset();
+
+        // Temporarily disable command tree recording
+        const wasInCommandContext = this.commandTree.inCommandContext;
+        this.commandTree.inCommandContext = true;
+
+        // Replay all commands up to current position
+        for (let i = 0; i < cmdSequence.length; i++) {
+            this.executeKeyNormal(cmdSequence[i]);
+        }
+
+        // Restore command context state
+        this.commandTree.inCommandContext = wasInCommandContext;
+
+        console.log('State reconstructed:', this.framework.frames.length, 'frames');
+    }
+
+    /**
+     * Execute a key command without command tree recording
+     * Used for internal replay during state reconstruction
+     */
+    executeKeyNormal(key) {
+        const fw = this.framework;
+
+        // Mode-dependent commands (ijkl)
+        if (fw.mode === 'translate') {
+            if (['i', 'j', 'k', 'l'].includes(key)) {
+                return this.handleTranslate(key);
+            }
+            fw.mode = 'normal';
+        } else if (fw.mode === 'translateCursor') {
+            if (['i', 'j', 'k', 'l'].includes(key)) {
+                return this.handleTranslateCursor(key);
+            }
+            fw.mode = 'normal';
+        } else if (fw.mode === 'scale') {
+            if (['i', 'k'].includes(key)) {
+                return this.handleScale(key);
+            }
+            fw.mode = 'normal';
+        } else if (fw.mode === 'scaleSelection') {
+            if (['i', 'k'].includes(key)) {
+                return this.handleScaleSelection(key);
+            }
+            fw.mode = 'normal';
+        }
+
+        // Normal mode commands (same as executeKey but without tree recording)
+        switch (key) {
+            case 'f':
+                this.createFrame();
+                break;
+            case 'd':
+            case 'D':
+                this.duplicateSelected();
+                break;
+            case 'x':
+                this.deleteSelected();
+                break;
+            case 't':
+                fw.mode = 'translate';
+                break;
+            case 'T':
+                fw.mode = 'translateCursor';
+                break;
+            case 's':
+                fw.mode = 'scale';
+                break;
+            case 'S':
+                fw.mode = 'scaleSelection';
+                break;
+            case 'r':
+                this.rotateSelected(Math.PI / 2);
+                break;
+            case 'R':
+                this.rotateSelected(Math.PI / 4);
+                break;
+            case 'e':
+                this.reflectSelectedH();
+                break;
+            case 'E':
+                this.reflectSelectedV();
+                break;
+            case 'a':
+                this.selectAllOfColor();
+                break;
+            case 'A':
+                fw.selectAll();
+                break;
+            case 'z':
+                fw.cursor.snapToOrigin();
+                break;
+            case ' ':
+                this.snapSelectionToCursor();
+                break;
+            case 'p':
+                this.cycleColorForward();
+                break;
+            case '0':
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+                this.setView(parseInt(key));
+                break;
+            case 'Escape':
+                fw.mode = 'normal';
+                break;
         }
     }
 }

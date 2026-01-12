@@ -100,6 +100,13 @@ class PaletteManager {
     getPaletteNames() {
         return Object.keys(PALETTES);
     }
+
+    /**
+     * Reset palette index to start
+     */
+    reset() {
+        this.currentIndex = 0;
+    }
 }
 
 // Export for use in other modules

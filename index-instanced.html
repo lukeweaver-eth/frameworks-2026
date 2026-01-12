@@ -58,14 +58,18 @@
             position: fixed;
             bottom: 20px;
             left: 20px;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.85);
             padding: 15px;
             border-radius: 5px;
             font-size: 12px;
-            max-width: 400px;
-            max-height: 200px;
+            max-width: 600px;
+            max-height: 300px;
             overflow-y: auto;
             pointer-events: none;
+        }
+
+        #command-history.command-context {
+            border: 2px solid #4ECDC4;
         }
 
         #command-history h3 {
@@ -76,6 +80,33 @@
         #command-string {
             color: #FFA07A;
             word-wrap: break-word;
+            font-family: 'Courier New', monospace;
+        }
+
+        #command-string .branch {
+            margin: 3px 0;
+            display: block;
+        }
+
+        #command-string .branch.current {
+            color: #4ECDC4;
+            font-weight: bold;
+        }
+
+        #command-string .cmd-char {
+            display: inline-block;
+            padding: 2px 4px;
+            margin: 0 1px;
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        #command-string .cmd-char.current {
+            background: #4ECDC4;
+            color: #000;
+        }
+
+        #command-string .cmd-char.future {
+            opacity: 0.4;
         }
 
         #help {
@@ -120,6 +151,81 @@
             font-size: 14px;
             pointer-events: none;
             color: #4ECDC4;
+        }
+
+        /* Compound command input overlay */
+        #command-input-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.9);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        #command-input-overlay.active {
+            display: flex;
+        }
+
+        #command-input-container {
+            background: #1a1a1a;
+            border: 2px solid #4ECDC4;
+            border-radius: 10px;
+            padding: 30px;
+            min-width: 500px;
+        }
+
+        #command-input-container h2 {
+            color: #4ECDC4;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        #command-input {
+            width: 100%;
+            background: #0a0a0a;
+            border: 1px solid #4ECDC4;
+            border-radius: 5px;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 18px;
+            color: #fff;
+            outline: none;
+        }
+
+        #command-input::placeholder {
+            color: #666;
+        }
+
+        #command-input-help {
+            margin-top: 15px;
+            color: #888;
+            font-size: 12px;
+            text-align: center;
+        }
+
+        #command-input-examples {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(78, 205, 196, 0.1);
+            border-radius: 5px;
+        }
+
+        #command-input-examples .example {
+            color: #4ECDC4;
+            margin: 5px 0;
+            font-size: 11px;
+        }
+
+        #command-input-examples .example code {
+            color: #FFA07A;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 2px 6px;
+            border-radius: 3px;
         }
     </style>
 </head>
@@ -166,6 +272,7 @@
         <div class="cmd"><span class="key">1-6</span><span class="desc">ortho views</span></div>
         <div class="cmd"><span class="key">f</span><span class="desc">create frame</span></div>
         <div class="cmd"><span class="key">d</span><span class="desc">duplicate</span></div>
+        <div class="cmd"><span class="key">x</span><span class="desc">delete</span></div>
         <div class="cmd"><span class="key">t/T</span><span class="desc">translate f/cursor</span></div>
         <div class="cmd"><span class="key">s/S</span><span class="desc">scale/scale all</span></div>
         <div class="cmd"><span class="key">ik</span><span class="desc">up/down (in mode)</span></div>
@@ -176,6 +283,24 @@
         <div class="cmd"><span class="key">z</span><span class="desc">cursor to origin</span></div>
         <div class="cmd"><span class="key">space</span><span class="desc">snap to cursor</span></div>
         <div class="cmd"><span class="key">p</span><span class="desc">cycle color</span></div>
+        <div class="cmd"><span class="key">/</span><span class="desc">compound cmd</span></div>
+        <div class="cmd"><span class="key">n</span><span class="desc">repeat last</span></div>
+        <div class="cmd"><span class="key">u</span><span class="desc">undo/fork mode</span></div>
+    </div>
+
+    <!-- Compound command input overlay -->
+    <div id="command-input-overlay">
+        <div id="command-input-container">
+            <h2>Compound Command</h2>
+            <input type="text" id="command-input" placeholder="Enter commands (e.g., R2R1, ftililir, etc.)">
+            <div id="command-input-help">
+                Press <strong>Enter</strong> to execute • <strong>Escape</strong> to cancel
+            </div>
+            <div id="command-input-examples">
+                <div class="example">Examples: <code>R2R1</code> <code>ftitititRRR</code> <code>1fp5fpp2fppp</code></div>
+                <div class="example">Combines multiple commands into one sequence</div>
+            </div>
+        </div>
     </div>
 
     <!-- Three.js from CDN -->
@@ -184,6 +309,7 @@
     <!-- Frameworks modules -->
     <script src="src/core.js"></script>
     <script src="src/palette.js"></script>
+    <script src="src/command-tree.js"></script>
     <script src="src/commands.js"></script>
     <script src="src/renderer-instanced.js"></script>
 
@@ -192,8 +318,9 @@
         // Initialize framework
         const framework = new Framework();
         const paletteManager = new PaletteManager('checks');
+        const commandTree = new CommandTree();
         const renderer = new FrameworksInstancedRenderer(framework, 'container');
-        const commandExecutor = new CommandExecutor(framework, paletteManager, renderer);
+        const commandExecutor = new CommandExecutor(framework, paletteManager, renderer, commandTree);
 
         // Start rendering
         renderer.start();
@@ -215,6 +342,53 @@
             }
         }
 
+        // Update command history visualization
+        function updateCommandHistoryUI() {
+            const historyPanel = document.getElementById('command-history');
+            const commandString = document.getElementById('command-string');
+
+            if (commandTree.inCommandContext) {
+                // Show tree structure with highlighting
+                historyPanel.classList.add('command-context');
+
+                const branches = commandTree.getAllBranches();
+                const pos = commandTree.getPosition();
+
+                let html = '';
+                branches.forEach((branch, rowIdx) => {
+                    const isCurrentRow = (rowIdx === pos.row);
+                    const branchClass = isCurrentRow ? 'branch current' : 'branch';
+
+                    html += `<div class="${branchClass}">`;
+
+                    branch.forEach((cmd, colIdx) => {
+                        let cmdClass = 'cmd-char';
+
+                        if (isCurrentRow && colIdx === pos.col) {
+                            cmdClass += ' current';  // Current position
+                        } else if (isCurrentRow && colIdx > pos.col) {
+                            cmdClass += ' future';   // Future commands in current branch
+                        }
+
+                        html += `<span class="${cmdClass}">${cmd}</span>`;
+                    });
+
+                    if (isCurrentRow) {
+                        html += ' ← HERE';
+                    }
+
+                    html += '</div>';
+                });
+
+                commandString.innerHTML = html;
+            } else {
+                // Show simple command string
+                historyPanel.classList.remove('command-context');
+                const cmdSequence = commandTree.getCurrentCommandSequence();
+                commandString.textContent = cmdSequence.join('') || '(no commands yet)';
+            }
+        }
+
         // UI update loop
         function updateUI() {
             updateFPS();
@@ -222,31 +396,124 @@
             const viewNames = ['Spatial', 'Front', 'Right', 'Back', 'Left', 'Top', 'Bottom'];
             document.getElementById('view').textContent =
                 `${framework.currentView} (${viewNames[framework.currentView]})`;
-            document.getElementById('mode').textContent = framework.mode;
+            document.getElementById('mode').textContent = commandTree.inCommandContext ? 'COMMAND CONTEXT' : framework.mode;
             document.getElementById('frame-count').textContent = framework.frames.length;
             document.getElementById('selected-count').textContent = framework.getSelectedFrames().length;
             document.getElementById('cursor-pos').textContent =
                 `(${framework.cursor.x.toFixed(1)}, ${framework.cursor.y.toFixed(1)}, ${framework.cursor.z.toFixed(1)})`;
-            document.getElementById('command-string').textContent =
-                framework.commandHistory.join(' ') || '(no commands yet)';
             document.getElementById('fps').textContent = fps;
             document.getElementById('draw-calls').textContent = renderer.renderer.info.render.calls;
+
+            // Update command history visualization
+            updateCommandHistoryUI();
 
             requestAnimationFrame(updateUI);
         }
         updateUI();
 
+        // Compound command overlay state
+        const commandOverlay = document.getElementById('command-input-overlay');
+        const commandInput = document.getElementById('command-input');
+        let overlayActive = false;
+        let lastCompoundCommand = '';  // Only stores compound commands, not single keys
+
+        // Open compound command overlay
+        function openCommandOverlay() {
+            overlayActive = true;
+            commandOverlay.classList.add('active');
+            commandInput.value = '';
+            commandInput.focus();
+        }
+
+        // Close compound command overlay
+        function closeCommandOverlay() {
+            overlayActive = false;
+            commandOverlay.classList.remove('active');
+            commandInput.blur();
+        }
+
+        // Execute compound command from overlay
+        function executeCompoundCommand() {
+            const cmdString = commandInput.value.trim();
+            if (cmdString) {
+                console.log('Executing compound command:', cmdString);
+                commandExecutor.executeCommandString(cmdString);
+                lastCompoundCommand = cmdString;
+            }
+            closeCommandOverlay();
+        }
+
+        // Repeat last command
+        function repeatLastCommand() {
+            if (lastCompoundCommand) {
+                console.log('Repeating last compound command:', lastCompoundCommand);
+                commandExecutor.executeCommandString(lastCompoundCommand);
+            } else {
+                console.log('No compound command to repeat');
+            }
+        }
+
+        // Handle compound command input overlay
+        commandInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                executeCompoundCommand();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                closeCommandOverlay();
+            }
+        });
+
+        // Filter out non-state-changing keys
+        function isStateChangingKey(key) {
+            const ignoredKeys = [
+                'Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Tab',
+                'Enter', 'Backspace', 'Delete', 'Insert', 'Home', 'End',
+                'PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+                'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'
+            ];
+            return !ignoredKeys.includes(key);
+        }
+
         // Keyboard input
         document.addEventListener('keydown', (e) => {
+            // If overlay is active, only handle Escape
+            if (overlayActive) {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeCommandOverlay();
+                }
+                return;
+            }
+
+            // Ignore non-state-changing keys
+            if (!isStateChangingKey(e.key)) {
+                return;
+            }
+
             console.log('Key pressed:', e.key);
 
+            // Handle special compound command key
+            if (e.key === '/') {
+                e.preventDefault();
+                openCommandOverlay();
+                return;
+            }
+
+            // Handle repeat last command
+            if (e.key === 'n') {
+                e.preventDefault();
+                repeatLastCommand();
+                return;
+            }
+
             // Prevent default for keys we're using
-            if (['f', 'd', 't', 'T', 's', 'S', 'r', 'R', 'e', 'E', 'a', 'A', 'z', 'p',
+            if (['f', 'd', 'D', 'x', 't', 'T', 's', 'S', 'r', 'R', 'e', 'E', 'a', 'A', 'z', 'p', 'u',
                  'i', 'j', 'k', 'l', ' ', 'Escape', '0', '1', '2', '3', '4', '5', '6'].includes(e.key)) {
                 e.preventDefault();
             }
 
-            // Execute command
+            // Execute command (but don't store single keys as "last command")
             commandExecutor.executeKey(e.key);
         });
 

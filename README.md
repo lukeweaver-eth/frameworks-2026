@@ -4,7 +4,7 @@ A spatial content structure tool for constructing compositions in 3D space using
 
 ## Version
 
-**v3.0.0** - Stable release with correct orthogonal frame rendering (2026-01-12)
+**v3.1.0-dev** - Context system architecture and enhanced features (2026-01-12)
 
 ## Quick Start
 
@@ -87,8 +87,8 @@ The orientation matrix uses world +Y as a consistent reference, ensuring frames 
 - `R` - Rotate 45° counter-clockwise around active plane's normal
 
 ### Reflection
-- `e` - Reflect horizontally around cursor
-- `E` - Reflect vertically around cursor
+- `e` - Reflect horizontally (across vertical plane at cursor)
+- `E` - Reflect vertically (across horizontal plane at cursor)
 
 ### Selection
 - `A` - Select all frames
@@ -99,8 +99,9 @@ The orientation matrix uses world +Y as a consistent reference, ensuring frames 
 - `s` + `i/k` - Scale individual frames up/down
 - `S` + `i/k` - Scale entire selection up/down
 
-### Duplication
-- `d` - Duplicate selected frames in place
+### Duplication & Deletion
+- `d` / `D` - Duplicate selected frames in place
+- `x` - Delete selected frames
 
 ### View Control
 - `0` - Spatial view (default)
@@ -116,6 +117,13 @@ The orientation matrix uses world +Y as a consistent reference, ensuring frames 
 
 ### Color
 - `p` - Cycle to next color in palette
+
+### Command History & Undo
+- `u` - Enter command context (undo/fork navigation mode)
+  - `ijkl` - Navigate command history (j=back, l=forward, i=up branch, k=down branch)
+  - Any other key - Exit context and execute/fork
+- `/` - Enter compound command input overlay
+- `n` - Repeat last compound command
 
 ### Mode Control
 - `Escape` - Exit current mode (translate, scale, etc.)
@@ -189,20 +197,31 @@ The custom GLSL vertex shader (`src/renderer-instanced.js`) handles:
 ## Documentation
 
 - **COORDINATE_SYSTEMS.md** - Detailed explanation of 6-view system and coordinate mappings
+- **CONTEXT_SYSTEM.md** - Universal context navigation architecture (command history, color palettes, etc.)
 - **CHANGELOG.md** - Version history and critical bug fixes
 - **CLAUDE.md** - Design philosophy and project vision
 
+## Recent Enhancements (v3.1.0-dev)
+
+- ✅ Command tree with 2D navigation (undo/fork system)
+- ✅ Compound command input (/ key)
+- ✅ Command repeat (n key)
+- ✅ Delete command (x key)
+- ✅ View-relative reflections with normal flipping
+- ✅ Duplicate with d/D (both keys)
+- ✅ Context system architecture documented
+
 ## Future Enhancements
 
-- [ ] Context system for custom transformations
+- [ ] Color palette context (p + ijkl navigation)
+- [ ] Camera preset context (c + ijkl navigation)
 - [ ] Component frames (nested content)
+- [ ] Content/writing context (w key)
 - [ ] Save/load functionality
 - [ ] Blockchain integration for command storage
-- [ ] Animation system
-- [ ] Undo/redo
+- [ ] Animation system with IJKL continuous playback
 - [ ] Line thickness controls
 - [ ] Named selections
-- [ ] Camera presets
 
 ## License
 

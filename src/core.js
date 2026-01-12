@@ -242,9 +242,22 @@ class Framework {
         this.currentView = 1;  // 1=front (default), 2=right, etc.
         this.gridSize = 1;     // Translation step size
 
-        // Command history
+        // Command history (legacy - kept for backwards compatibility)
         this.commandHistory = [];
         this.actionHistory = [];
+    }
+
+    /**
+     * Clear all frames and reset state
+     * Used when reconstructing from command history
+     */
+    clear() {
+        this.frames = [];
+        this.cursor = new Cursor();
+        this.frameCounter = 0;
+        this.mode = 'normal';
+        this.currentView = 1;
+        console.log('Framework cleared');
     }
 
     /**
