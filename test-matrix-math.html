@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head><title>Matrix Math Analysis</title></head>
+<body>
+<pre id="output"></pre>
+<script>
+const output = document.getElementById('output');
+
+function log(msg) {
+    output.textContent += msg + '\n';
+}
+
+// Simulate the shader's createOrientationMatrix
+function createOrientationMatrix(normal) {
+    const n = { x: normal[0], y: normal[1], z: normal[2] };
+
+    // Normalize
+    const len = Math.sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+    n.x /= len;
+    n.y /= len;
+    n.z /= len;
+
+    const defaultNormal = { x: 0, y: 0, z: 1 };
+    const dist = Math.sqrt(
+        Math.pow(n.x - defaultNormal.x, 2) +
+        Math.pow(n.y - defaultNormal.y, 2) +
+        Math.pow(n.z - defaultNormal.z, 2)
+    );
+
+    // If same as default, return identity
+    if (dist < 0.001) {
+        return [
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1]
+        ];
+    }
+
+    // Build orthonormal basis
+    let helper;
+    if (Math.abs(n.x) < 0.9) {
+        helper = { x: 1, y: 0, z: 0 };
+    } else {
+        helper = { x: 0, y: 1, z: 0 };
+    }
+
+    // tangent = cross(helper, n)
+    const cross1 = {
+        x: helper.y * n.z - helper.z * n.y,
+        y: helper.z * n.x - helper.x * n.z,
+        z: helper.x * n.y - helper.y * n.x
+    };
+    const len1 = Math.sqrt(cross1.x * cross1.x + cross1.y * cross1.y + cross1.z * cross1.z);
+    const tangent = { x: cross1.x / len1, y: cross1.y / len1, z: cross1.z / len1 };
+
+    // bitangent = cross(n, tangent)
+    const cross2 = {
+        x: n.y * tangent.z - n.z * tangent.y,
+        y: n.z * tangent.x - n.x * tangent.z,
+        z: n.x * tangent.y - n.y * tangent.x
+    };
+    const len2 = Math.sqrt(cross2.x * cross2.x + cross2.y * cross2.y + cross2.z * cross2.z);
+    const bitangent = { x: cross2.x / len2, y: cross2.y / len2, z: cross2.z / len2 };
+
+    // Matrix columns: tangent, bitangent, normal
+    return [
+        [tangent.x, tangent.y, tangent.z],
+        [bitangent.x, bitangent.y, bitangent.z],
+        [n.x, n.y, n.z]
+    ];
+}
+
+// Multiply matrix by vector
+function matVecMul(mat, vec) {
+    return [
+        mat[0][0] * vec[0] + mat[1][0] * vec[1] + mat[2][0] * vec[2],
+        mat[0][1] * vec[0] + mat[1][1] * vec[1] + mat[2][1] * vec[2],
+        mat[0][2] * vec[0] + mat[1][2] * vec[1] + mat[2][2] * vec[2]
+    ];
+}
+
+// Rodrigues rotation
+function rotateAroundAxis(v, k, theta) {
+    const len = Math.sqrt(k[0] * k[0] + k[1] * k[1] + k[2] * k[2]);
+    const kn = [k[0] / len, k[1] / len, k[2] / len];
+
+    const cosTheta = Math.cos(theta);
+    const sinTheta = Math.sin(theta);
+
+    // cross(kn, v)
+    const cross_kv = [
+        kn[1] * v[2] - kn[2] * v[1],
+        kn[2] * v[0] - kn[0] * v[2],
+        kn[0] * v[1] - kn[1] * v[0]
+    ];
+
+    // dot(kn, v)
+    const dot_kv = kn[0] * v[0] + kn[1] * v[1] + kn[2] * v[2];
+
+    // v*cos(θ) + (k×v)*sin(θ) + k*(k·v)*(1-cos(θ))
+    return [
+        v[0] * cosTheta + cross_kv[0] * sinTheta + kn[0] * dot_kv * (1 - cosTheta),
+        v[1] * cosTheta + cross_kv[1] * sinTheta + kn[1] * dot_kv * (1 - cosTheta),
+        v[2] * cosTheta + cross_kv[2] * sinTheta + kn[2] * dot_kv * (1 - cosTheta)
+    ];
+}
+
+log('=== Testing Shader Transform Logic ===\n');
+
+// Test case: Frame with normal at 45° in XZ plane
+const normal = [0.707, 0, 0.707]; // 45° between +X and +Z
+const roll = Math.PI / 4; // 45° roll
+
+log('Frame configuration:');
+log(`  Normal: (${normal[0].toFixed(3)}, ${normal[1].toFixed(3)}, ${normal[2].toFixed(3)})`);
+log(`  Roll: ${roll.toFixed(3)} rad (${(roll * 180 / Math.PI).toFixed(1)}°)`);
+log('');
+
+// Base geometry point (corner of frame)
+const basePoint = [0.5, 0.5, 0]; // Top-right corner of base square
+log(`Base point: (${basePoint[0]}, ${basePoint[1]}, ${basePoint[2]})`);
+log('');
+
+// Step 1: Scale (skip for now, assume size=1)
+log('Step 1: Scale by size=1 (no change)');
+let pos = [...basePoint];
+log(`  Result: (${pos[0]}, ${pos[1]}, ${pos[2]})`);
+log('');
+
+// Step 2: Apply orientation matrix
+log('Step 2: Apply orientation matrix');
+const orientMatrix = createOrientationMatrix(normal);
+log('  Orientation matrix:');
+log(`    Row 0 (X): [${orientMatrix[0][0].toFixed(3)}, ${orientMatrix[0][1].toFixed(3)}, ${orientMatrix[0][2].toFixed(3)}]`);
+log(`    Row 1 (Y): [${orientMatrix[1][0].toFixed(3)}, ${orientMatrix[1][1].toFixed(3)}, ${orientMatrix[1][2].toFixed(3)}]`);
+log(`    Row 2 (Z): [${orientMatrix[2][0].toFixed(3)}, ${orientMatrix[2][1].toFixed(3)}, ${orientMatrix[2][2].toFixed(3)}]`);
+pos = matVecMul(orientMatrix, pos);
+log(`  Result: (${pos[0].toFixed(3)}, ${pos[1].toFixed(3)}, ${pos[2].toFixed(3)})`);
+log('');
+
+// Step 3: Apply roll rotation
+log('Step 3: Apply roll rotation around normal');
+log(`  Rotating by ${(roll * 180 / Math.PI).toFixed(1)}° around (${normal[0].toFixed(3)}, ${normal[1].toFixed(3)}, ${normal[2].toFixed(3)})`);
+const posBeforeRoll = [...pos];
+pos = rotateAroundAxis(pos, normal, roll);
+log(`  Before: (${posBeforeRoll[0].toFixed(3)}, ${posBeforeRoll[1].toFixed(3)}, ${posBeforeRoll[2].toFixed(3)})`);
+log(`  After:  (${pos[0].toFixed(3)}, ${pos[1].toFixed(3)}, ${pos[2].toFixed(3)})`);
+log('');
+
+log('=== Analysis ===');
+log('The orientation matrix transforms the base XY square to align with the normal.');
+log('Then Rodrigues rotation spins the square around that normal axis.');
+log('');
+
+// Verify the normal is preserved
+log('Verification: Does the normal remain fixed?');
+const normalTransformed = matVecMul(orientMatrix, [0, 0, 1]); // Where does +Z go?
+log(`  Base normal [0, 0, 1] transforms to: (${normalTransformed[0].toFixed(3)}, ${normalTransformed[1].toFixed(3)}, ${normalTransformed[2].toFixed(3)})`);
+log(`  Expected normal: (${normal[0].toFixed(3)}, ${normal[1].toFixed(3)}, ${normal[2].toFixed(3)})`);
+const diff = Math.sqrt(
+    Math.pow(normalTransformed[0] - normal[0], 2) +
+    Math.pow(normalTransformed[1] - normal[1], 2) +
+    Math.pow(normalTransformed[2] - normal[2], 2)
+);
+log(`  Difference: ${diff.toFixed(6)} ${diff < 0.01 ? '✓ PASS' : '✗ FAIL'}`);
+log('');
+
+// Check if roll rotation changes the normal
+const normalAfterRoll = rotateAroundAxis(normalTransformed, normal, roll);
+log(`  After roll rotation: (${normalAfterRoll[0].toFixed(3)}, ${normalAfterRoll[1].toFixed(3)}, ${normalAfterRoll[2].toFixed(3)})`);
+const diff2 = Math.sqrt(
+    Math.pow(normalAfterRoll[0] - normal[0], 2) +
+    Math.pow(normalAfterRoll[1] - normal[1], 2) +
+    Math.pow(normalAfterRoll[2] - normal[2], 2)
+);
+log(`  Difference: ${diff2.toFixed(6)} ${diff2 < 0.01 ? '✓ Normal preserved' : '✗ Normal changed'}`);
+log('');
+
+log('=== Testing All Four Corners ===');
+const corners = [
+    [-0.5, -0.5, 0], // bottom-left
+    [0.5, -0.5, 0],  // bottom-right
+    [0.5, 0.5, 0],   // top-right
+    [-0.5, 0.5, 0]   // top-left
+];
+
+log('Transforming all 4 corners of the base square:\n');
+const transformedCorners = corners.map((corner, i) => {
+    const step1 = matVecMul(orientMatrix, corner);
+    const step2 = rotateAroundAxis(step1, normal, roll);
+    log(`Corner ${i}: (${corner[0]}, ${corner[1]}, ${corner[2]})`);
+    log(`  After orient: (${step1[0].toFixed(3)}, ${step1[1].toFixed(3)}, ${step1[2].toFixed(3)})`);
+    log(`  After roll:   (${step2[0].toFixed(3)}, ${step2[1].toFixed(3)}, ${step2[2].toFixed(3)})`);
+    return step2;
+});
+
+log('\n=== Checking Square Properties ===');
+// Calculate distances between adjacent corners
+const dist01 = Math.sqrt(
+    Math.pow(transformedCorners[1][0] - transformedCorners[0][0], 2) +
+    Math.pow(transformedCorners[1][1] - transformedCorners[0][1], 2) +
+    Math.pow(transformedCorners[1][2] - transformedCorners[0][2], 2)
+);
+const dist12 = Math.sqrt(
+    Math.pow(transformedCorners[2][0] - transformedCorners[1][0], 2) +
+    Math.pow(transformedCorners[2][1] - transformedCorners[1][1], 2) +
+    Math.pow(transformedCorners[2][2] - transformedCorners[1][2], 2)
+);
+const dist23 = Math.sqrt(
+    Math.pow(transformedCorners[3][0] - transformedCorners[2][0], 2) +
+    Math.pow(transformedCorners[3][1] - transformedCorners[2][1], 2) +
+    Math.pow(transformedCorners[3][2] - transformedCorners[2][2], 2)
+);
+const dist30 = Math.sqrt(
+    Math.pow(transformedCorners[0][0] - transformedCorners[3][0], 2) +
+    Math.pow(transformedCorners[0][1] - transformedCorners[3][1], 2) +
+    Math.pow(transformedCorners[0][2] - transformedCorners[3][2], 2)
+);
+
+log(`Edge 0→1: ${dist01.toFixed(3)} (should be 1.0)`);
+log(`Edge 1→2: ${dist12.toFixed(3)} (should be 1.0)`);
+log(`Edge 2→3: ${dist23.toFixed(3)} (should be 1.0)`);
+log(`Edge 3→0: ${dist30.toFixed(3)} (should be 1.0)`);
+log('');
+
+const avgDist = (dist01 + dist12 + dist23 + dist30) / 4;
+const distVariance = Math.sqrt(
+    (Math.pow(dist01 - avgDist, 2) +
+     Math.pow(dist12 - avgDist, 2) +
+     Math.pow(dist23 - avgDist, 2) +
+     Math.pow(dist30 - avgDist, 2)) / 4
+);
+
+log(`Average edge length: ${avgDist.toFixed(3)}`);
+log(`Edge length variance: ${distVariance.toFixed(6)}`);
+log(`${Math.abs(avgDist - 1.0) < 0.01 && distVariance < 0.01 ? '✓ Square preserved' : '✗ Square distorted'}`);
+
+</script>
+</body>
+</html>

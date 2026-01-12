@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head><title>User Sequence Test</title></head>
+<body>
+<h3>Testing: ftililildRdRdRdRdRdRdR then 2AtllllldRdRdRdRdRdRdR</h3>
+<pre id="output"></pre>
+<script src="src/core.js"></script>
+<script src="src/palette.js"></script>
+<script src="src/commands.js"></script>
+<script>
+const output = document.getElementById('output');
+
+function log(msg) {
+    output.textContent += msg + '\n';
+    console.log(msg);
+}
+
+// Create framework
+const fw = new Framework();
+const palette = new PaletteManager();
+const executor = new CommandExecutor(fw, palette);
+
+// Execute first sequence in view 1
+log('=== Part 1: ftililildRdRdRdRdRdRdR (view 1) ===');
+executor.executeCommandString('ftililildRdRdRdRdRdRdR');
+
+log(`\nAfter part 1: ${fw.frames.length} frames`);
+fw.frames.forEach((f, i) => {
+    log(`Frame ${i}: pos=(${f.x.toFixed(1)}, ${f.y.toFixed(1)}, ${f.z.toFixed(1)}), normal=(${f.ihat.toFixed(3)}, ${f.jhat.toFixed(3)}, ${f.khat.toFixed(3)}), roll=${f.roll.toFixed(3)}`);
+});
+
+// Execute second sequence in view 2
+log('\n=== Part 2: 2AtllllldRdRdRdRdRdRdR (view 2) ===');
+executor.executeCommandString('2Atlllll');
+
+log(`\nAfter translation: ${fw.frames.length} frames, cursor at (${fw.cursor.x}, ${fw.cursor.y}, ${fw.cursor.z})`);
+const selected = fw.getSelectedFrames();
+log(`Selected frames: ${selected.length}`);
+selected.forEach((f, i) => {
+    log(`  Selected ${i}: pos=(${f.x.toFixed(1)}, ${f.y.toFixed(1)}, ${f.z.toFixed(1)}), normal=(${f.ihat.toFixed(3)}, ${f.jhat.toFixed(3)}, ${f.khat.toFixed(3)})`);
+});
+
+// Now do the dR sequence manually so we can track what happens
+log('\n=== First dR ===');
+executor.executeKey('d');
+log(`After duplicate: ${fw.frames.length} frames, ${fw.getSelectedFrames().length} selected`);
+executor.executeKey('R');
+log(`After rotate:`);
+fw.getSelectedFrames().forEach((f, i) => {
+    log(`  Frame ${i}: normal=(${f.ihat.toFixed(3)}, ${f.jhat.toFixed(3)}, ${f.khat.toFixed(3)})`);
+});
+
+log('\n=== Second dR ===');
+executor.executeKey('d');
+log(`After duplicate: ${fw.frames.length} frames, ${fw.getSelectedFrames().length} selected`);
+executor.executeKey('R');
+log(`After rotate:`);
+fw.getSelectedFrames().forEach((f, i) => {
+    log(`  Frame ${i}: normal=(${f.ihat.toFixed(3)}, ${f.jhat.toFixed(3)}, ${f.khat.toFixed(3)})`);
+});
+
+log('\n=== Third dR ===');
+executor.executeKey('d');
+executor.executeKey('R');
+log(`After dR: Selected frames:`);
+fw.getSelectedFrames().forEach((f, i) => {
+    log(`  Frame ${i}: normal=(${f.ihat.toFixed(3)}, ${f.jhat.toFixed(3)}, ${f.khat.toFixed(3)})`);
+});
+
+log('\n=== Summary of ALL frames ===');
+fw.frames.forEach((f, i) => {
+    log(`Frame ${i}: normal=(${f.ihat.toFixed(3)}, ${f.jhat.toFixed(3)}, ${f.khat.toFixed(3)}), roll=${f.roll.toFixed(3)}`);
+});
+
+log('\n=== Analysis ===');
+const normalCounts = {};
+fw.frames.forEach(f => {
+    const key = `(${f.ihat.toFixed(2)}, ${f.jhat.toFixed(2)}, ${f.khat.toFixed(2)})`;
+    normalCounts[key] = (normalCounts[key] || 0) + 1;
+});
+log('Normal distribution:');
+for (const [normal, count] of Object.entries(normalCounts)) {
+    log(`  ${normal}: ${count} frames`);
+}
+</script>
+</body>
+</html>

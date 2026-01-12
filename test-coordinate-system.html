@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Coordinate System Test</title>
+    <style>
+        body { margin: 0; font-family: monospace; }
+        #output {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow-y: auto;
+            font-size: 11px;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+<div id="container"></div>
+<pre id="output"></pre>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="src/core.js"></script>
+<script src="src/palette.js"></script>
+<script src="src/commands.js"></script>
+<script src="src/renderer-instanced.js"></script>
+
+<script>
+const output = document.getElementById('output');
+
+function log(msg) {
+    output.textContent += msg + '\n';
+    console.log(msg);
+}
+
+// Create framework
+const fw = new Framework();
+const palette = new PaletteManager();
+const renderer = new FrameworksInstancedRenderer(fw);
+const executor = new CommandExecutor(fw, palette, renderer);
+
+renderer.start();
+
+// Run the test sequence
+log('=== Test Sequence: 1fp5fpp2fppp ===');
+log('Creating 3 frames as coordinate axes:');
+log('- Frame 0: view 1 (XY plane, normal +Z)');
+log('- Frame 1: view 5 (XZ plane, normal +Y)');
+log('- Frame 2: view 2 (YZ plane, normal +X)');
+log('');
+
+executor.executeCommandString('1fp5fpp2fppp');
+
+log(`Created ${fw.frames.length} frames:`);
+fw.frames.forEach((f, i) => {
+    log(`Frame ${i}: pos=(${f.x.toFixed(1)}, ${f.y.toFixed(1)}, ${f.z.toFixed(1)}), normal=(${f.ihat.toFixed(2)}, ${f.jhat.toFixed(2)}, ${f.khat.toFixed(2)})`);
+});
+
+log('\n=== Step 2: tiiiiiillllll (translate up 6, right 6) ===');
+executor.executeCommandString('tiiiiiillllll');
+
+log(`After translation:`);
+fw.frames.forEach((f, i) => {
+    log(`Frame ${i}: pos=(${f.x.toFixed(1)}, ${f.y.toFixed(1)}, ${f.z.toFixed(1)})`);
+});
+
+log('\n=== Step 3: 5tiiiiii (switch to view 5, translate up 6) ===');
+executor.executeCommandString('5tiiiiii');
+
+log(`After view 5 translation:`);
+fw.frames.forEach((f, i) => {
+    log(`Frame ${i}: pos=(${f.x.toFixed(1)}, ${f.y.toFixed(1)}, ${f.z.toFixed(1)})`);
+});
+
+log('\n=== Step 4: RRRRRRRR (8x 45° rotations around Y axis) ===');
+log('Each R rotates 45° counter-clockwise around Y axis');
+log('After 8 rotations (360°), should return to original orientation\n');
+
+for (let i = 0; i < 8; i++) {
+    executor.executeKey('R');
+    log(`After rotation ${i + 1}:`);
+    fw.frames.forEach((f, idx) => {
+        log(`  Frame ${idx}: pos=(${f.x.toFixed(2)}, ${f.y.toFixed(2)}, ${f.z.toFixed(2)}), normal=(${f.ihat.toFixed(3)}, ${f.jhat.toFixed(3)}, ${f.khat.toFixed(3)}), roll=${f.roll.toFixed(3)}`);
+    });
+}
+
+log('\n=== Step 5: 1R (switch to view 1, rotate 45° around Z axis) ===');
+executor.executeCommandString('1R');
+
+log(`After view 1 rotation:`);
+fw.frames.forEach((f, i) => {
+    log(`Frame ${i}: pos=(${f.x.toFixed(2)}, ${f.y.toFixed(2)}, ${f.z.toFixed(2)}), normal=(${f.ihat.toFixed(3)}, ${f.jhat.toFixed(3)}, ${f.khat.toFixed(3)}), roll=${f.roll.toFixed(3)}`);
+});
+
+log('\n=== Analysis ===');
+log('The frames should form a 3D coordinate system:');
+log('- Frame 0 started in XY plane (normal pointing +Z)');
+log('- Frame 1 started in XZ plane (normal pointing +Y)');
+log('- Frame 2 started in YZ plane (normal pointing +X)');
+log('');
+log('After rotations around Y axis, the normals should rotate:');
+log('- The +Y normal should stay constant');
+log('- The +Z and +X normals should rotate in the XZ plane');
+log('');
+log('After final rotation around Z axis:');
+log('- All normals should change (none are parallel to Z axis)');
+log('- Roll should update for any frames with normal parallel to Z');
+
+// Detailed vertex analysis
+log('\n=== Detailed Frame Geometry ===');
+log('Analyzing how the base frame geometry is transformed:\n');
+
+fw.frames.forEach((f, i) => {
+    log(`Frame ${i}:`);
+    log(`  Position: (${f.x.toFixed(2)}, ${f.y.toFixed(2)}, ${f.z.toFixed(2)})`);
+    log(`  Normal: (${f.ihat.toFixed(3)}, ${f.jhat.toFixed(3)}, ${f.khat.toFixed(3)})`);
+    log(`  Roll: ${f.roll.toFixed(3)} rad (${(f.roll * 180 / Math.PI).toFixed(1)}°)`);
+
+    // Simulate what the shader does
+    log(`  Shader transformations:`);
+    log(`    1. Base geometry: 4 lines forming a square in XY plane`);
+    log(`    2. Scale by size: ${f.size}`);
+    log(`    3. Orient to normal direction (creates orthonormal basis)`);
+    log(`    4. Apply roll rotation around normal`);
+    log(`    5. Translate to position`);
+
+    // Calculate what the orientation matrix would be
+    const n = { x: f.ihat, y: f.jhat, z: f.khat };
+    const defaultNormal = { x: 0, y: 0, z: 1 };
+
+    const dist = Math.sqrt(
+        Math.pow(n.x - defaultNormal.x, 2) +
+        Math.pow(n.y - defaultNormal.y, 2) +
+        Math.pow(n.z - defaultNormal.z, 2)
+    );
+
+    if (dist < 0.001) {
+        log(`    Orientation: Identity (normal is default +Z)`);
+    } else {
+        // Build orthonormal basis like shader does
+        let helper;
+        if (Math.abs(n.x) < 0.9) {
+            helper = { x: 1, y: 0, z: 0 };
+        } else {
+            helper = { x: 0, y: 1, z: 0 };
+        }
+
+        // tangent = normalize(cross(helper, n))
+        const cross1 = {
+            x: helper.y * n.z - helper.z * n.y,
+            y: helper.z * n.x - helper.x * n.z,
+            z: helper.x * n.y - helper.y * n.x
+        };
+        const len1 = Math.sqrt(cross1.x * cross1.x + cross1.y * cross1.y + cross1.z * cross1.z);
+        const tangent = { x: cross1.x / len1, y: cross1.y / len1, z: cross1.z / len1 };
+
+        // bitangent = normalize(cross(n, tangent))
+        const cross2 = {
+            x: n.y * tangent.z - n.z * tangent.y,
+            y: n.z * tangent.x - n.x * tangent.z,
+            z: n.x * tangent.y - n.y * tangent.x
+        };
+        const len2 = Math.sqrt(cross2.x * cross2.x + cross2.y * cross2.y + cross2.z * cross2.z);
+        const bitangent = { x: cross2.x / len2, y: cross2.y / len2, z: cross2.z / len2 };
+
+        log(`    Orientation basis:`);
+        log(`      tangent (new X):   (${tangent.x.toFixed(3)}, ${tangent.y.toFixed(3)}, ${tangent.z.toFixed(3)})`);
+        log(`      bitangent (new Y): (${bitangent.x.toFixed(3)}, ${bitangent.y.toFixed(3)}, ${bitangent.z.toFixed(3)})`);
+        log(`      normal (new Z):    (${n.x.toFixed(3)}, ${n.y.toFixed(3)}, ${n.z.toFixed(3)})`);
+
+        // Verify orthonormality
+        const dot_tb = tangent.x * bitangent.x + tangent.y * bitangent.y + tangent.z * bitangent.z;
+        const dot_tn = tangent.x * n.x + tangent.y * n.y + tangent.z * n.z;
+        const dot_bn = bitangent.x * n.x + bitangent.y * n.y + bitangent.z * n.z;
+
+        log(`      dot(tangent, bitangent) = ${dot_tb.toFixed(4)} (should be ~0)`);
+        log(`      dot(tangent, normal) = ${dot_tn.toFixed(4)} (should be ~0)`);
+        log(`      dot(bitangent, normal) = ${dot_bn.toFixed(4)} (should be ~0)`);
+    }
+    log('');
+});
+
+log('\n=== Key Observation ===');
+log('The frame geometry starts as 4 lines in the XY plane:');
+log('  Top:    (-0.625, -0.5, 0) to (0.625, -0.5, 0)');
+log('  Bottom: (-0.625,  0.5, 0) to (0.625,  0.5, 0)');
+log('  Left:   (-0.5, -0.625, 0) to (-0.5, 0.625, 0)');
+log('  Right:  ( 0.5, -0.625, 0) to ( 0.5, 0.625, 0)');
+log('');
+log('The shader transforms each vertex by:');
+log('  1. Scaling by size');
+log('  2. Multiplying by orientation matrix (aligns to normal)');
+log('  3. Applying Rodrigues rotation around normal by roll angle');
+log('  4. Adding position offset');
+log('');
+log('If roll rotation is being applied incorrectly, frames at 45°');
+log('angles will not maintain their visual orientation correctly.');
+
+</script>
+</body>
+</html>

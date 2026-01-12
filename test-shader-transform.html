@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+<head><title>Shader Transform Verification</title></head>
+<body>
+<pre id="output"></pre>
+<script>
+const output = document.getElementById('output');
+
+function log(msg) {
+    output.textContent += msg + '\n';
+}
+
+// Simulate the exact shader transformations
+function simulateShaderTransform(basePoint, normal, roll, scale) {
+    log(`\n--- Transform Simulation ---`);
+    log(`Input: point=(${basePoint[0]}, ${basePoint[1]}, ${basePoint[2]}), normal=(${normal[0].toFixed(3)}, ${normal[1].toFixed(3)}, ${normal[2].toFixed(3)}), roll=${roll.toFixed(3)}, scale=${scale}`);
+
+    // Step 1: Scale
+    let pos = [basePoint[0] * scale, basePoint[1] * scale, basePoint[2] * scale];
+    log(`After scale: (${pos[0].toFixed(3)}, ${pos[1].toFixed(3)}, ${pos[2].toFixed(3)})`);
+
+    // Step 2: Apply roll in local XY plane (around Z axis)
+    if (Math.abs(roll) > 0.001) {
+        const c = Math.cos(roll);
+        const s = Math.sin(roll);
+        const newPos = [
+            pos[0] * c - pos[1] * s,
+            pos[0] * s + pos[1] * c,
+            pos[2]
+        ];
+        pos = newPos;
+        log(`After roll rotation: (${pos[0].toFixed(3)}, ${pos[1].toFixed(3)}, ${pos[2].toFixed(3)})`);
+    }
+
+    // Step 3: Create orientation matrix
+    const n = [...normal];
+    const nlen = Math.sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
+    n[0] /= nlen; n[1] /= nlen; n[2] /= nlen;
+
+    // Check if default
+    const defaultNormal = [0, 0, 1];
+    const dist = Math.sqrt(
+        Math.pow(n[0] - defaultNormal[0], 2) +
+        Math.pow(n[1] - defaultNormal[1], 2) +
+        Math.pow(n[2] - defaultNormal[2], 2)
+    );
+
+    if (dist < 0.001) {
+        log(`Orientation: Identity (normal is default)`);
+        // pos unchanged
+    } else {
+        // Build orthonormal basis
+        let helper;
+        if (Math.abs(n[0]) < 0.9) {
+            helper = [1, 0, 0];
+        } else {
+            helper = [0, 1, 0];
+        }
+
+        // tangent = cross(helper, n)
+        const tangent = [
+            helper[1] * n[2] - helper[2] * n[1],
+            helper[2] * n[0] - helper[0] * n[2],
+            helper[0] * n[1] - helper[1] * n[0]
+        ];
+        let tlen = Math.sqrt(tangent[0]*tangent[0] + tangent[1]*tangent[1] + tangent[2]*tangent[2]);
+        tangent[0] /= tlen; tangent[1] /= tlen; tangent[2] /= tlen;
+
+        // bitangent = cross(n, tangent)
+        const bitangent = [
+            n[1] * tangent[2] - n[2] * tangent[1],
+            n[2] * tangent[0] - n[0] * tangent[2],
+            n[0] * tangent[1] - n[1] * tangent[0]
+        ];
+        let blen = Math.sqrt(bitangent[0]*bitangent[0] + bitangent[1]*bitangent[1] + bitangent[2]*bitangent[2]);
+        bitangent[0] /= blen; bitangent[1] /= blen; bitangent[2] /= blen;
+
+        log(`Orientation basis:`);
+        log(`  tangent:   (${tangent[0].toFixed(3)}, ${tangent[1].toFixed(3)}, ${tangent[2].toFixed(3)})`);
+        log(`  bitangent: (${bitangent[0].toFixed(3)}, ${bitangent[1].toFixed(3)}, ${bitangent[2].toFixed(3)})`);
+        log(`  normal:    (${n[0].toFixed(3)}, ${n[1].toFixed(3)}, ${n[2].toFixed(3)})`);
+
+        // Apply orientation matrix (column-major)
+        const newPos = [
+            tangent[0] * pos[0] + bitangent[0] * pos[1] + n[0] * pos[2],
+            tangent[1] * pos[0] + bitangent[1] * pos[1] + n[1] * pos[2],
+            tangent[2] * pos[0] + bitangent[2] * pos[1] + n[2] * pos[2]
+        ];
+        pos = newPos;
+        log(`After orientation: (${pos[0].toFixed(3)}, ${pos[1].toFixed(3)}, ${pos[2].toFixed(3)})`);
+    }
+
+    return pos;
+}
+
+log('Testing Shader Transformations on Frame Corners');
+log('===============================================\n');
+
+log('We will test the 4 corners of a frame and verify:');
+log('1. The frame maintains its shape (square with unit edges)');
+log('2. The frame is correctly oriented according to its normal');
+log('3. Roll rotation works correctly\n');
+
+// Test Case 1: Frame with normal [0,0,1], roll=0
+log('\n=== TEST 1: Frame at origin, normal +Z, no roll ===');
+const corners1 = [
+    [-0.5, -0.5, 0],
+    [0.5, -0.5, 0],
+    [0.5, 0.5, 0],
+    [-0.5, 0.5, 0]
+];
+const normal1 = [0, 0, 1];
+const roll1 = 0;
+const scale1 = 1;
+
+const transformed1 = corners1.map((c, i) => {
+    const result = simulateShaderTransform(c, normal1, roll1, scale1);
+    log(`Corner ${i}: (${c[0]}, ${c[1]}, ${c[2]}) -> (${result[0].toFixed(3)}, ${result[1].toFixed(3)}, ${result[2].toFixed(3)})`);
+    return result;
+});
+
+// Test Case 2: Frame with normal [0,0,1], roll=45°
+log('\n\n=== TEST 2: Frame at origin, normal +Z, roll=45° ===');
+const roll2 = Math.PI / 4;
+const transformed2 = corners1.map((c, i) => {
+    const result = simulateShaderTransform(c, normal1, roll2, scale1);
+    log(`Corner ${i}: (${c[0]}, ${c[1]}, ${c[2]}) -> (${result[0].toFixed(3)}, ${result[1].toFixed(3)}, ${result[2].toFixed(3)})`);
+    return result;
+});
+
+// Test Case 3: Frame with normal [0.707, 0, 0.707], roll=0
+log('\n\n=== TEST 3: Frame at origin, normal 45° (XZ plane), no roll ===');
+const normal3 = [0.707, 0, 0.707];
+const roll3 = 0;
+const transformed3 = corners1.map((c, i) => {
+    const result = simulateShaderTransform(c, normal3, roll3, scale1);
+    log(`Corner ${i}: (${c[0]}, ${c[1]}, ${c[2]}) -> (${result[0].toFixed(3)}, ${result[1].toFixed(3)}, ${result[2].toFixed(3)})`);
+    return result;
+});
+
+// Test Case 4: Frame with normal [0.707, 0, 0.707], roll=45°
+log('\n\n=== TEST 4: Frame at origin, normal 45° (XZ plane), roll=45° ===');
+const roll4 = Math.PI / 4;
+const transformed4 = corners1.map((c, i) => {
+    const result = simulateShaderTransform(c, normal3, roll4, scale1);
+    log(`Corner ${i}: (${c[0]}, ${c[1]}, ${c[2]}) -> (${result[0].toFixed(3)}, ${result[1].toFixed(3)}, ${result[2].toFixed(3)})`);
+    return result;
+});
+
+// Verify frame properties for each test
+function verifyFrame(corners, testName) {
+    log(`\n--- Verification for ${testName} ---`);
+
+    // Calculate edge lengths
+    const edges = [
+        Math.sqrt(Math.pow(corners[1][0] - corners[0][0], 2) + Math.pow(corners[1][1] - corners[0][1], 2) + Math.pow(corners[1][2] - corners[0][2], 2)),
+        Math.sqrt(Math.pow(corners[2][0] - corners[1][0], 2) + Math.pow(corners[2][1] - corners[1][1], 2) + Math.pow(corners[2][2] - corners[1][2], 2)),
+        Math.sqrt(Math.pow(corners[3][0] - corners[2][0], 2) + Math.pow(corners[3][1] - corners[2][1], 2) + Math.pow(corners[3][2] - corners[2][2], 2)),
+        Math.sqrt(Math.pow(corners[0][0] - corners[3][0], 2) + Math.pow(corners[0][1] - corners[3][1], 2) + Math.pow(corners[0][2] - corners[3][2], 2))
+    ];
+
+    log(`Edge lengths: [${edges.map(e => e.toFixed(3)).join(', ')}]`);
+    const avgEdge = edges.reduce((a, b) => a + b, 0) / 4;
+    log(`Average: ${avgEdge.toFixed(3)} (should be ~1.0)`);
+
+    const allEqual = edges.every(e => Math.abs(e - avgEdge) < 0.01);
+    log(`All edges equal? ${allEqual ? '✓' : '✗'}`);
+
+    // Check if it's a square (diagonals should be equal)
+    const diag1 = Math.sqrt(Math.pow(corners[2][0] - corners[0][0], 2) + Math.pow(corners[2][1] - corners[0][1], 2) + Math.pow(corners[2][2] - corners[0][2], 2));
+    const diag2 = Math.sqrt(Math.pow(corners[3][0] - corners[1][0], 2) + Math.pow(corners[3][1] - corners[1][1], 2) + Math.pow(corners[3][2] - corners[1][2], 2));
+
+    log(`Diagonals: ${diag1.toFixed(3)}, ${diag2.toFixed(3)}`);
+    log(`Diagonals equal? ${Math.abs(diag1 - diag2) < 0.01 ? '✓' : '✗'}`);
+    log(`Diagonal length correct? ${Math.abs(diag1 - Math.sqrt(2)) < 0.01 ? '✓' : '✗'} (should be ~1.414)`);
+}
+
+verifyFrame(transformed1, 'TEST 1');
+verifyFrame(transformed2, 'TEST 2');
+verifyFrame(transformed3, 'TEST 3');
+verifyFrame(transformed4, 'TEST 4');
+
+log('\n\n=== CONCLUSION ===');
+log('If all tests show:');
+log('  - Average edge length ≈ 1.0');
+log('  - All edges equal');
+log('  - Diagonals equal and ≈ √2');
+log('Then the shader math is CORRECT.');
+log('\nIf the visual appearance is wrong despite correct math,');
+log('the issue might be in Three.js setup or frame line geometry.');
+
+</script>
+</body>
+</html>

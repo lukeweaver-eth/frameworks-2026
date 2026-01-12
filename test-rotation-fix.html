@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+<head><title>Rotation Logic Test - Normal Vector Updates</title></head>
+<body>
+<pre id="output"></pre>
+<script>
+const output = document.getElementById('output');
+
+function log(msg) {
+    output.textContent += msg + '\n';
+}
+
+// Test the rotation logic
+class Frame {
+    constructor(x, y, z, ihat, jhat, khat) {
+        this.x = x;
+        this.y = y;
+        this.z = z;
+        this.ihat = ihat;
+        this.jhat = jhat;
+        this.khat = khat;
+        this.roll = 0;
+    }
+
+    rotate(centerX, centerY, centerZ, angle, axis = 'z') {
+        // Rotate position around pivot point
+        const dx = this.x - centerX;
+        const dy = this.y - centerY;
+        const dz = this.z - centerZ;
+
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+
+        let newDx, newDy, newDz;
+
+        switch (axis) {
+            case 'x':
+                newDx = dx;
+                newDy = dy * cos - dz * sin;
+                newDz = dy * sin + dz * cos;
+                break;
+            case 'y':
+                newDx = dx * cos + dz * sin;
+                newDy = dy;
+                newDz = -dx * sin + dz * cos;
+                break;
+            case 'z':
+            default:
+                newDx = dx * cos - dy * sin;
+                newDy = dx * sin + dy * cos;
+                newDz = dz;
+                break;
+        }
+
+        this.x = centerX + newDx;
+        this.y = centerY + newDy;
+        this.z = centerZ + newDz;
+
+        // ALWAYS rotate the normal vector
+        const oldIhat = this.ihat;
+        const oldJhat = this.jhat;
+        const oldKhat = this.khat;
+
+        switch (axis) {
+            case 'x':
+                this.ihat = oldIhat;
+                this.jhat = oldJhat * cos - oldKhat * sin;
+                this.khat = oldJhat * sin + oldKhat * cos;
+                break;
+            case 'y':
+                this.ihat = oldIhat * cos + oldKhat * sin;
+                this.jhat = oldJhat;
+                this.khat = -oldIhat * sin + oldKhat * cos;
+                break;
+            case 'z':
+                this.ihat = oldIhat * cos - oldJhat * sin;
+                this.jhat = oldIhat * sin + oldJhat * cos;
+                this.khat = oldKhat;
+                break;
+        }
+
+        // Additionally, update roll if rotating in the frame's own plane
+        const rotatingInOwnPlane =
+            (axis === 'z' && Math.abs(oldKhat) > 0.9) ||
+            (axis === 'x' && Math.abs(oldIhat) > 0.9) ||
+            (axis === 'y' && Math.abs(oldJhat) > 0.9);
+
+        if (rotatingInOwnPlane) {
+            this.roll += angle;
+        }
+
+        return { oldNormal: [oldIhat, oldJhat, oldKhat], inPlane: rotatingInOwnPlane };
+    }
+}
+
+// Test 1: Frame in XY plane (view 1), rotate around Z axis (90°)
+log('=== Test 1: XY plane frame, rotate around Z axis (in-plane) ===');
+const frame1 = new Frame(1, 0, 0, 0, 0, 1);
+log(`Initial: pos=(${frame1.x}, ${frame1.y}, ${frame1.z}), normal=(${frame1.ihat.toFixed(2)}, ${frame1.jhat.toFixed(2)}, ${frame1.khat.toFixed(2)}), roll=${frame1.roll.toFixed(2)}`);
+const result1 = frame1.rotate(0, 0, 0, Math.PI / 2, 'z');
+log(`After:   pos=(${frame1.x.toFixed(2)}, ${frame1.y.toFixed(2)}, ${frame1.z.toFixed(2)}), normal=(${frame1.ihat.toFixed(2)}, ${frame1.jhat.toFixed(2)}, ${frame1.khat.toFixed(2)}), roll=${frame1.roll.toFixed(2)}`);
+log(`In-plane rotation: ${result1.inPlane}`);
+log(`Normal should stay ~(0, 0, 1): ${Math.abs(frame1.khat - 1.0) < 0.01 ? 'PASS' : 'FAIL'}`);
+log(`Roll should increase: ${frame1.roll > 1.5 ? 'PASS' : 'FAIL'}`);
+log('');
+
+// Test 2: Frame in XY plane (view 1), rotate around X axis (45°, out-of-plane)
+log('=== Test 2: XY plane frame, rotate around X axis (out-of-plane) ===');
+const frame2 = new Frame(1, 0, 0, 0, 0, 1);
+log(`Initial: pos=(${frame2.x}, ${frame2.y}, ${frame2.z}), normal=(${frame2.ihat.toFixed(2)}, ${frame2.jhat.toFixed(2)}, ${frame2.khat.toFixed(2)}), roll=${frame2.roll.toFixed(2)}`);
+const result2 = frame2.rotate(0, 0, 0, Math.PI / 4, 'x');
+log(`After:   pos=(${frame2.x.toFixed(2)}, ${frame2.y.toFixed(2)}, ${frame2.z.toFixed(2)}), normal=(${frame2.ihat.toFixed(2)}, ${frame2.jhat.toFixed(2)}, ${frame2.khat.toFixed(2)}), roll=${frame2.roll.toFixed(2)}`);
+log(`In-plane rotation: ${result2.inPlane}`);
+log(`Normal SHOULD change from (0,0,1): ${Math.abs(frame2.khat - 1.0) > 0.1 ? 'PASS' : 'FAIL'}`);
+log(`Roll should NOT increase: ${frame2.roll < 0.1 ? 'PASS' : 'FAIL'}`);
+log('');
+
+// Test 3: Frame in YZ plane (view 2), rotate around X axis (90°, in-plane)
+log('=== Test 3: YZ plane frame, rotate around X axis (in-plane) ===');
+const frame3 = new Frame(0, 1, 0, 1, 0, 0);
+log(`Initial: pos=(${frame3.x}, ${frame3.y}, ${frame3.z}), normal=(${frame3.ihat.toFixed(2)}, ${frame3.jhat.toFixed(2)}, ${frame3.khat.toFixed(2)}), roll=${frame3.roll.toFixed(2)}`);
+const result3 = frame3.rotate(0, 0, 0, Math.PI / 2, 'x');
+log(`After:   pos=(${frame3.x.toFixed(2)}, ${frame3.y.toFixed(2)}, ${frame3.z.toFixed(2)}), normal=(${frame3.ihat.toFixed(2)}, ${frame3.jhat.toFixed(2)}, ${frame3.khat.toFixed(2)}), roll=${frame3.roll.toFixed(2)}`);
+log(`In-plane rotation: ${result3.inPlane}`);
+log(`Normal should stay ~(1, 0, 0): ${Math.abs(frame3.ihat - 1.0) < 0.01 ? 'PASS' : 'FAIL'}`);
+log(`Roll should increase: ${frame3.roll > 1.5 ? 'PASS' : 'FAIL'}`);
+log('');
+
+// Test 4: Frame in YZ plane (view 2), rotate around Z axis (45°, out-of-plane)
+log('=== Test 4: YZ plane frame, rotate around Z axis (out-of-plane) ===');
+const frame4 = new Frame(0, 1, 0, 1, 0, 0);
+log(`Initial: pos=(${frame4.x}, ${frame4.y}, ${frame4.z}), normal=(${frame4.ihat.toFixed(2)}, ${frame4.jhat.toFixed(2)}, ${frame4.khat.toFixed(2)}), roll=${frame4.roll.toFixed(2)}`);
+const result4 = frame4.rotate(0, 0, 0, Math.PI / 4, 'z');
+log(`After:   pos=(${frame4.x.toFixed(2)}, ${frame4.y.toFixed(2)}, ${frame4.z.toFixed(2)}), normal=(${frame4.ihat.toFixed(2)}, ${frame4.jhat.toFixed(2)}, ${frame4.khat.toFixed(2)}), roll=${frame4.roll.toFixed(2)}`);
+log(`In-plane rotation: ${result4.inPlane}`);
+log(`Normal SHOULD change from (1,0,0): ${Math.abs(frame4.ihat - 1.0) > 0.1 ? 'PASS' : 'FAIL'}`);
+log(`Roll should NOT increase: ${frame4.roll < 0.1 ? 'PASS' : 'FAIL'}`);
+log('');
+
+// Test 5: Frame in XZ plane (view 5), rotate around Y axis (90°, in-plane)
+log('=== Test 5: XZ plane frame, rotate around Y axis (in-plane) ===');
+const frame5 = new Frame(0, 0, 1, 0, 1, 0);
+log(`Initial: pos=(${frame5.x}, ${frame5.y}, ${frame5.z}), normal=(${frame5.ihat.toFixed(2)}, ${frame5.jhat.toFixed(2)}, ${frame5.khat.toFixed(2)}), roll=${frame5.roll.toFixed(2)}`);
+const result5 = frame5.rotate(0, 0, 0, Math.PI / 2, 'y');
+log(`After:   pos=(${frame5.x.toFixed(2)}, ${frame5.y.toFixed(2)}, ${frame5.z.toFixed(2)}), normal=(${frame5.ihat.toFixed(2)}, ${frame5.jhat.toFixed(2)}, ${frame5.khat.toFixed(2)}), roll=${frame5.roll.toFixed(2)}`);
+log(`In-plane rotation: ${result5.inPlane}`);
+log(`Normal should stay ~(0, 1, 0): ${Math.abs(frame5.jhat - 1.0) < 0.01 ? 'PASS' : 'FAIL'}`);
+log(`Roll should increase: ${frame5.roll > 1.5 ? 'PASS' : 'FAIL'}`);
+log('');
+
+// Test 6: Multiple 45° rotations accumulating normal changes
+log('=== Test 6: Multiple 45° rotations (should accumulate normal changes) ===');
+const frame6 = new Frame(1, 0, 0, 0, 0, 1);
+log(`Initial: normal=(${frame6.ihat.toFixed(2)}, ${frame6.jhat.toFixed(2)}, ${frame6.khat.toFixed(2)})`);
+for (let i = 1; i <= 4; i++) {
+    frame6.rotate(0, 0, 0, Math.PI / 4, 'x');
+    log(`After ${i}x45° around X: normal=(${frame6.ihat.toFixed(2)}, ${frame6.jhat.toFixed(2)}, ${frame6.khat.toFixed(2)})`);
+}
+log(`After 4x45° (180°), normal should be ~(0, 0, -1): ${Math.abs(frame6.khat + 1.0) < 0.1 ? 'PASS' : 'FAIL'}`);
+log('');
+
+log('=== Summary ===');
+log('If all tests show PASS, the rotation logic is working correctly:');
+log('1. Normals always rotate with the transformation');
+log('2. Roll only updates for in-plane rotations');
+log('3. Out-of-plane rotations change frame orientation without changing roll');
+</script>
+</body>
+</html>

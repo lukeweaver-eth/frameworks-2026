@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head><title>Rotation Test</title></head>
+<body>
+<script>
+// Simple test
+const frame = {
+    ihat: 1, jhat: 0, khat: 0,
+    roll: 0
+};
+
+const axis = 'x';
+const angle = Math.PI / 2;
+
+const rotatingAroundNormal =
+    (axis === 'z' && Math.abs(frame.khat) > 0.9) ||
+    (axis === 'x' && Math.abs(frame.ihat) > 0.9) ||
+    (axis === 'y' && Math.abs(frame.jhat) > 0.9);
+
+console.log('Frame normal:', frame.ihat, frame.jhat, frame.khat);
+console.log('Rotation axis:', axis);
+console.log('Should rotate in plane?', rotatingAroundNormal);
+console.log('ihat check:', Math.abs(frame.ihat), '> 0.9?', Math.abs(frame.ihat) > 0.9);
+
+if (rotatingAroundNormal) {
+    frame.roll += angle;
+    console.log('New roll:', frame.roll);
+} else {
+    console.log('Would update normal vector instead');
+}
+</script>
+</body>
+</html>

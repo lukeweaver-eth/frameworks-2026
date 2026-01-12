@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Orthogonality Test</title>
+    <style>
+        body { margin: 0; font-family: monospace; }
+        #output {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.85);
+            color: white;
+            padding: 15px;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            font-size: 11px;
+            z-index: 100;
+            line-height: 1.4;
+        }
+        .pass { color: #4ade80; }
+        .fail { color: #f87171; }
+        .warn { color: #fbbf24; }
+        .section { margin-top: 15px; border-top: 1px solid #444; padding-top: 10px; }
+    </style>
+</head>
+<body>
+<div id="container"></div>
+<pre id="output"></pre>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="src/core.js"></script>
+<script src="src/palette.js"></script>
+<script src="src/commands.js"></script>
+<script src="src/renderer-instanced.js"></script>
+
+<script>
+const output = document.getElementById('output');
+
+function log(msg, className = '') {
+    const line = document.createElement('span');
+    line.textContent = msg + '\n';
+    if (className) line.className = className;
+    output.appendChild(line);
+    console.log(msg);
+}
+
+function checkOrthogonality(frames, stepName) {
+    log(`\n<span class="section">=== ${stepName} ===</span>`, '');
+
+    if (frames.length < 3) {
+        log('Not enough frames to check orthogonality', 'warn');
+        return;
+    }
+
+    // Assume first 3 frames form the coordinate system
+    const f0 = frames[0];
+    const f1 = frames[1];
+    const f2 = frames[2];
+
+    const n0 = { x: f0.ihat, y: f0.jhat, z: f0.khat };
+    const n1 = { x: f1.ihat, y: f1.jhat, z: f1.khat };
+    const n2 = { x: f2.ihat, y: f2.jhat, z: f2.khat };
+
+    log(`Frame 0 normal: (${n0.x.toFixed(4)}, ${n0.y.toFixed(4)}, ${n0.z.toFixed(4)}), roll: ${f0.roll.toFixed(4)}`);
+    log(`Frame 1 normal: (${n1.x.toFixed(4)}, ${n1.y.toFixed(4)}, ${n1.z.toFixed(4)}), roll: ${f1.roll.toFixed(4)}`);
+    log(`Frame 2 normal: (${n2.x.toFixed(4)}, ${n2.y.toFixed(4)}, ${n2.z.toFixed(4)}), roll: ${f2.roll.toFixed(4)}`);
+
+    // Calculate dot products (should be ~0 for orthogonal vectors)
+    const dot01 = n0.x * n1.x + n0.y * n1.y + n0.z * n1.z;
+    const dot02 = n0.x * n2.x + n0.y * n2.y + n0.z * n2.z;
+    const dot12 = n1.x * n2.x + n1.y * n2.y + n1.z * n2.z;
+
+    // Calculate magnitudes (should be ~1 for unit vectors)
+    const mag0 = Math.sqrt(n0.x * n0.x + n0.y * n0.y + n0.z * n0.z);
+    const mag1 = Math.sqrt(n1.x * n1.x + n1.y * n1.y + n1.z * n1.z);
+    const mag2 = Math.sqrt(n2.x * n2.x + n2.y * n2.y + n2.z * n2.z);
+
+    log('\nMagnitudes (should be ~1.0):');
+    log(`  |n0| = ${mag0.toFixed(6)} ${Math.abs(mag0 - 1.0) < 0.001 ? '✓' : '✗'}`, Math.abs(mag0 - 1.0) < 0.001 ? 'pass' : 'fail');
+    log(`  |n1| = ${mag1.toFixed(6)} ${Math.abs(mag1 - 1.0) < 0.001 ? '✓' : '✗'}`, Math.abs(mag1 - 1.0) < 0.001 ? 'pass' : 'fail');
+    log(`  |n2| = ${mag2.toFixed(6)} ${Math.abs(mag2 - 1.0) < 0.001 ? '✓' : '✗'}`, Math.abs(mag2 - 1.0) < 0.001 ? 'pass' : 'fail');
+
+    log('\nDot products (should be ~0.0 for orthogonal):');
+    log(`  n0 · n1 = ${dot01.toFixed(6)} ${Math.abs(dot01) < 0.01 ? '✓' : '✗'}`, Math.abs(dot01) < 0.01 ? 'pass' : 'fail');
+    log(`  n0 · n2 = ${dot02.toFixed(6)} ${Math.abs(dot02) < 0.01 ? '✓' : '✗'}`, Math.abs(dot02) < 0.01 ? 'pass' : 'fail');
+    log(`  n1 · n2 = ${dot12.toFixed(6)} ${Math.abs(dot12) < 0.01 ? '✓' : '✗'}`, Math.abs(dot12) < 0.01 ? 'pass' : 'fail');
+
+    // Calculate angles in degrees
+    const angle01 = Math.acos(Math.max(-1, Math.min(1, dot01))) * 180 / Math.PI;
+    const angle02 = Math.acos(Math.max(-1, Math.min(1, dot02))) * 180 / Math.PI;
+    const angle12 = Math.acos(Math.max(-1, Math.min(1, dot12))) * 180 / Math.PI;
+
+    log('\nAngles between normals:');
+    log(`  ∠(n0, n1) = ${angle01.toFixed(2)}° ${Math.abs(angle01 - 90) < 1 ? '✓' : '✗'}`, Math.abs(angle01 - 90) < 1 ? 'pass' : 'fail');
+    log(`  ∠(n0, n2) = ${angle02.toFixed(2)}° ${Math.abs(angle02 - 90) < 1 ? '✓' : '✗'}`, Math.abs(angle02 - 90) < 1 ? 'pass' : 'fail');
+    log(`  ∠(n1, n2) = ${angle12.toFixed(2)}° ${Math.abs(angle12 - 90) < 1 ? '✓' : '✗'}`, Math.abs(angle12 - 90) < 1 ? 'pass' : 'fail');
+
+    // Calculate cross product to verify right-handed system
+    const cross = {
+        x: n0.y * n1.z - n0.z * n1.y,
+        y: n0.z * n1.x - n0.x * n1.z,
+        z: n0.x * n1.y - n0.y * n1.x
+    };
+    const crossMag = Math.sqrt(cross.x * cross.x + cross.y * cross.y + cross.z * cross.z);
+    const crossNorm = { x: cross.x / crossMag, y: cross.y / crossMag, z: cross.z / crossMag };
+
+    log('\nCross product check (n0 × n1 should align with ±n2):');
+    log(`  n0 × n1 = (${crossNorm.x.toFixed(4)}, ${crossNorm.y.toFixed(4)}, ${crossNorm.z.toFixed(4)})`);
+
+    const dotCrossN2 = crossNorm.x * n2.x + crossNorm.y * n2.y + crossNorm.z * n2.z;
+    log(`  (n0 × n1) · n2 = ${dotCrossN2.toFixed(4)} (should be ±1)`, Math.abs(Math.abs(dotCrossN2) - 1.0) < 0.1 ? 'pass' : 'fail');
+
+    const isOrthogonal = Math.abs(dot01) < 0.01 && Math.abs(dot02) < 0.01 && Math.abs(dot12) < 0.01;
+
+    if (isOrthogonal) {
+        log('\n✓ Coordinate system is ORTHOGONAL', 'pass');
+    } else {
+        log('\n✗ Coordinate system is NOT ORTHOGONAL', 'fail');
+        log('   Frames are visually distorted!', 'fail');
+    }
+
+    return isOrthogonal;
+}
+
+// Create framework
+const fw = new Framework();
+const palette = new PaletteManager();
+const renderer = new FrameworksInstancedRenderer(fw);
+const executor = new CommandExecutor(fw, palette, renderer);
+
+renderer.start();
+
+log('=== Test: XYZ Coordinate System Orthogonality ===', '');
+log('Creating 3 frames as orthogonal coordinate axes:', '');
+log('  Frame 0: view 1 (XY plane, normal +Z = 0,0,1)');
+log('  Frame 1: view 5 (XZ plane, normal +Y = 0,1,0)');
+log('  Frame 2: view 2 (YZ plane, normal +X = 1,0,0)');
+
+// Create the coordinate system
+executor.executeCommandString('1fp5fpp2fppp');
+checkOrthogonality(fw.frames, 'Initial State: 1fp5fpp2fppp');
+
+// Test 1: 90° rotations around Z axis (view 1)
+log('\n\n<span style="color: cyan;">━━━ TEST 1: Four 90° rotations around Z axis (view 1) ━━━</span>', '');
+for (let i = 1; i <= 4; i++) {
+    executor.executeKey('r');
+    checkOrthogonality(fw.frames, `After ${i} × 90° rotation around Z`);
+}
+log('\nExpected: After 4 × 90° = 360°, should return to original orientation');
+
+// Reset
+fw.frames = [];
+fw.cursor.snapToOrigin();
+executor.executeCommandString('1fp5fpp2fppp');
+
+// Test 2: 45° rotations around Z axis
+log('\n\n<span style="color: cyan;">━━━ TEST 2: Eight 45° rotations around Z axis (view 1) ━━━</span>', '');
+for (let i = 1; i <= 8; i++) {
+    executor.executeKey('R');
+    checkOrthogonality(fw.frames, `After ${i} × 45° rotation around Z`);
+}
+log('\nExpected: After 8 × 45° = 360°, should return to original orientation');
+
+// Reset
+fw.frames = [];
+fw.cursor.snapToOrigin();
+executor.executeCommandString('1fp5fpp2fppp');
+
+// Test 3: 45° rotations around Y axis (view 5)
+log('\n\n<span style="color: cyan;">━━━ TEST 3: Eight 45° rotations around Y axis (view 5) ━━━</span>', '');
+executor.executeKey('5'); // Switch to view 5
+for (let i = 1; i <= 8; i++) {
+    executor.executeKey('R');
+    checkOrthogonality(fw.frames, `After ${i} × 45° rotation around Y`);
+}
+log('\nExpected: After 8 × 45° = 360°, should return to original orientation');
+
+// Reset
+fw.frames = [];
+fw.cursor.snapToOrigin();
+executor.executeCommandString('1fp5fpp2fppp');
+
+// Test 4: Mixed rotations
+log('\n\n<span style="color: cyan;">━━━ TEST 4: Mixed 45° rotations (Z then Y then Z) ━━━</span>', '');
+executor.executeCommandString('1R');
+checkOrthogonality(fw.frames, 'After 1 × 45° around Z');
+
+executor.executeCommandString('5RR');
+checkOrthogonality(fw.frames, 'After 2 × 45° around Y');
+
+executor.executeCommandString('1R');
+checkOrthogonality(fw.frames, 'After another 1 × 45° around Z');
+
+// Test 5: The user's exact sequence
+fw.frames = [];
+fw.cursor.snapToOrigin();
+log('\n\n<span style="color: cyan;">━━━ TEST 5: User\'s exact sequence ━━━</span>', '');
+log('Sequence: 1fp5fpp2fppp tiiiiiillllll 5tiiiiii RRRRRRRR 1R');
+
+executor.executeCommandString('1fp5fpp2fppp');
+checkOrthogonality(fw.frames, 'Initial: 1fp5fpp2fppp');
+
+executor.executeCommandString('tiiiiiillllll');
+log('\nTranslated up 6, right 6');
+
+executor.executeCommandString('5tiiiiii');
+log('Switched to view 5, translated up 6 (in view 5 space)');
+checkOrthogonality(fw.frames, 'After translation');
+
+log('\nNow doing 8 × 45° rotations around Y axis:');
+for (let i = 1; i <= 8; i++) {
+    executor.executeKey('R');
+    if (i === 1 || i === 2 || i === 7 || i === 8) {
+        checkOrthogonality(fw.frames, `After rotation ${i}/8 around Y`);
+    }
+}
+
+executor.executeCommandString('1R');
+checkOrthogonality(fw.frames, 'Final: After 45° rotation around Z');
+
+// Summary
+log('\n\n<span style="color: yellow;">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>', '');
+log('<span style="color: yellow;">SUMMARY</span>', '');
+log('<span style="color: yellow;">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>', '');
+log('\nThe coordinate system normals are stored correctly in Frame objects.');
+log('If they remain orthogonal mathematically but appear wrong visually,');
+log('the issue is in the SHADER rendering logic, not the data model.');
+log('\nKey insight: The shader must correctly transform the base frame');
+log('geometry using BOTH the normal orientation AND the roll angle.');
+
+</script>
+</body>
+</html>

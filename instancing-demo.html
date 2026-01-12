@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frameworks Instancing Demo - 10,000 Frames</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: #000;
+            color: #fff;
+            overflow: hidden;
+        }
+
+        #container {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #stats {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 5px;
+            font-size: 14px;
+            pointer-events: none;
+        }
+
+        #stats h3 {
+            color: #4ECDC4;
+            margin-bottom: 10px;
+        }
+
+        #stats .stat {
+            margin: 5px 0;
+        }
+
+        #stats .label {
+            color: #888;
+            display: inline-block;
+            width: 120px;
+        }
+
+        #stats .value {
+            color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+
+    <div id="stats">
+        <h3>INSTANCING DEMO</h3>
+        <div class="stat">
+            <span class="label">Frames:</span>
+            <span class="value" id="frame-count">0</span>
+        </div>
+        <div class="stat">
+            <span class="label">Draw Calls:</span>
+            <span class="value" id="draw-calls">0</span>
+        </div>
+        <div class="stat">
+            <span class="label">FPS:</span>
+            <span class="value" id="fps">0</span>
+        </div>
+        <div class="stat">
+            <span class="label">Triangles:</span>
+            <span class="value" id="triangles">0</span>
+        </div>
+    </div>
+
+    <!-- Three.js from CDN -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x0a0a0a);
+
+        // Camera
+        const camera = new THREE.PerspectiveCamera(
+            75,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            10000
+        );
+        camera.position.set(50, 50, 50);
+        camera.lookAt(0, 0, 0);
+
+        // Renderer
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.getElementById('container').appendChild(renderer.domElement);
+
+        // Orbit controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 10;
+        controls.maxDistance = 500;
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.4);
+        directionalLight.position.set(50, 50, 50);
+        scene.add(directionalLight);
+
+        // Create instanced frame geometry
+        const FRAME_COUNT = 100000;
+        const SPREAD = 200; // Spatial spread (larger to accommodate more frames)
+
+        // Create base frame geometry (4 lines with extensions)
+        function createFrameGeometry() {
+            const ext = 0.125; // Extension beyond corners (12.5% of size)
+
+            // Unit square centered at origin (will be scaled per instance)
+            // 4 lines as separate segments
+            const vertices = new Float32Array([
+                // Top line (with extensions)
+                -0.5 - ext, -0.5, 0,
+                0.5 + ext, -0.5, 0,
+
+                // Bottom line
+                -0.5 - ext, 0.5, 0,
+                0.5 + ext, 0.5, 0,
+
+                // Left line
+                -0.5, -0.5 - ext, 0,
+                -0.5, 0.5 + ext, 0,
+
+                // Right line
+                0.5, -0.5 - ext, 0,
+                0.5, 0.5 + ext, 0
+            ]);
+
+            const geometry = new THREE.InstancedBufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            geometry.instanceCount = FRAME_COUNT;
+
+            return geometry;
+        }
+
+        const baseGeometry = createFrameGeometry();
+
+        // Create instance attributes
+        const offsets = new Float32Array(FRAME_COUNT * 3);
+        const rotations = new Float32Array(FRAME_COUNT);
+        const scales = new Float32Array(FRAME_COUNT);
+        const colors = new Float32Array(FRAME_COUNT * 3);
+
+        // Generate random frame data
+        for (let i = 0; i < FRAME_COUNT; i++) {
+            // Random position in 3D space
+            offsets[i * 3] = (Math.random() - 0.5) * SPREAD;
+            offsets[i * 3 + 1] = (Math.random() - 0.5) * SPREAD;
+            offsets[i * 3 + 2] = (Math.random() - 0.5) * SPREAD;
+
+            // Random rotation
+            rotations[i] = Math.random() * Math.PI * 2;
+
+            // Random size (0.5 to 3.0)
+            scales[i] = 0.5 + Math.random() * 2.5;
+
+            // Random color
+            const hue = Math.random();
+            const saturation = 0.6 + Math.random() * 0.4;
+            const lightness = 0.5 + Math.random() * 0.3;
+
+            // Convert HSL to RGB
+            const c = (1 - Math.abs(2 * lightness - 1)) * saturation;
+            const x = c * (1 - Math.abs((hue * 6) % 2 - 1));
+            const m = lightness - c / 2;
+
+            let r, g, b;
+            if (hue < 1/6) { r = c; g = x; b = 0; }
+            else if (hue < 2/6) { r = x; g = c; b = 0; }
+            else if (hue < 3/6) { r = 0; g = c; b = x; }
+            else if (hue < 4/6) { r = 0; g = x; b = c; }
+            else if (hue < 5/6) { r = x; g = 0; b = c; }
+            else { r = c; g = 0; b = x; }
+
+            colors[i * 3] = r + m;
+            colors[i * 3 + 1] = g + m;
+            colors[i * 3 + 2] = b + m;
+        }
+
+        // Add instance attributes
+        baseGeometry.setAttribute('offset', new THREE.InstancedBufferAttribute(offsets, 3));
+        baseGeometry.setAttribute('rotation', new THREE.InstancedBufferAttribute(rotations, 1));
+        baseGeometry.setAttribute('scale', new THREE.InstancedBufferAttribute(scales, 1));
+        baseGeometry.setAttribute('instanceColor', new THREE.InstancedBufferAttribute(colors, 3));
+
+        // Custom shader material
+        const vertexShader = `
+            attribute vec3 offset;
+            attribute float rotation;
+            attribute float scale;
+            attribute vec3 instanceColor;
+
+            varying vec3 vColor;
+
+            void main() {
+                // Scale the base geometry
+                vec3 pos = position * scale;
+
+                // Rotate in XY plane
+                float c = cos(rotation);
+                float s = sin(rotation);
+                mat2 rot = mat2(c, -s, s, c);
+                pos.xy = rot * pos.xy;
+
+                // Translate to instance position
+                pos += offset;
+
+                // Apply camera transform
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+
+                // Pass color to fragment shader
+                vColor = instanceColor;
+            }
+        `;
+
+        const fragmentShader = `
+            varying vec3 vColor;
+
+            void main() {
+                gl_FragColor = vec4(vColor, 1.0);
+            }
+        `;
+
+        const material = new THREE.ShaderMaterial({
+            vertexShader: vertexShader,
+            fragmentShader: fragmentShader,
+        });
+
+        // Create instanced mesh
+        const instancedMesh = new THREE.LineSegments(baseGeometry, material);
+        instancedMesh.frustumCulled = false;
+        scene.add(instancedMesh);
+
+        // FPS counter
+        let lastTime = performance.now();
+        let frames = 0;
+        let fps = 0;
+
+        function updateFPS() {
+            frames++;
+            const currentTime = performance.now();
+            const delta = currentTime - lastTime;
+
+            if (delta >= 1000) {
+                fps = Math.round((frames * 1000) / delta);
+                frames = 0;
+                lastTime = currentTime;
+            }
+        }
+
+        // Update stats
+        function updateStats() {
+            document.getElementById('frame-count').textContent = FRAME_COUNT.toLocaleString();
+            document.getElementById('draw-calls').textContent = renderer.info.render.calls;
+            document.getElementById('fps').textContent = fps;
+            document.getElementById('triangles').textContent = renderer.info.render.triangles.toLocaleString();
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            updateFPS();
+            controls.update();
+            renderer.render(scene, camera);
+            updateStats();
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start
+        animate();
+
+        console.log('Rendering', FRAME_COUNT, 'frames with instancing');
+        console.log('Click and drag to orbit, scroll to zoom');
+    </script>
+</body>
+</html>

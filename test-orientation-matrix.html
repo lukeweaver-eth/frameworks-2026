@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head><title>Orientation Matrix Test</title></head>
+<body>
+<pre id="output"></pre>
+<script>
+const output = document.getElementById('output');
+
+function log(msg) {
+    output.textContent += msg + '\n';
+}
+
+// Test the orientation matrix algorithm for various normals
+function testOrientationMatrix(normal, label) {
+    log(`\n=== ${label} ===`);
+    log(`Normal: (${normal[0].toFixed(4)}, ${normal[1].toFixed(4)}, ${normal[2].toFixed(4)})`);
+
+    const n = [...normal];
+    const len = Math.sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
+    n[0] /= len; n[1] /= len; n[2] /= len;
+
+    // Choose helper
+    let helper;
+    if (Math.abs(n[0]) < 0.9) {
+        helper = [1, 0, 0];
+        log('Helper: (1, 0, 0)');
+    } else {
+        helper = [0, 1, 0];
+        log('Helper: (0, 1, 0)');
+    }
+
+    // tangent = cross(helper, n)
+    const tangent = [
+        helper[1] * n[2] - helper[2] * n[1],
+        helper[2] * n[0] - helper[0] * n[2],
+        helper[0] * n[1] - helper[1] * n[0]
+    ];
+    let tlen = Math.sqrt(tangent[0]*tangent[0] + tangent[1]*tangent[1] + tangent[2]*tangent[2]);
+    tangent[0] /= tlen; tangent[1] /= tlen; tangent[2] /= tlen;
+
+    // bitangent = cross(n, tangent)
+    const bitangent = [
+        n[1] * tangent[2] - n[2] * tangent[1],
+        n[2] * tangent[0] - n[0] * tangent[2],
+        n[0] * tangent[1] - n[1] * tangent[0]
+    ];
+    let blen = Math.sqrt(bitangent[0]*bitangent[0] + bitangent[1]*bitangent[1] + bitangent[2]*bitangent[2]);
+    bitangent[0] /= blen; bitangent[1] /= blen; bitangent[2] /= blen;
+
+    log(`Tangent:   (${tangent[0].toFixed(4)}, ${tangent[1].toFixed(4)}, ${tangent[2].toFixed(4)})`);
+    log(`Bitangent: (${bitangent[0].toFixed(4)}, ${bitangent[1].toFixed(4)}, ${bitangent[2].toFixed(4)})`);
+    log(`Normal:    (${n[0].toFixed(4)}, ${n[1].toFixed(4)}, ${n[2].toFixed(4)})`);
+
+    // Check orthonormality
+    const dot_tn = tangent[0]*n[0] + tangent[1]*n[1] + tangent[2]*n[2];
+    const dot_bn = bitangent[0]*n[0] + bitangent[1]*n[1] + bitangent[2]*n[2];
+    const dot_tb = tangent[0]*bitangent[0] + tangent[1]*bitangent[1] + tangent[2]*bitangent[2];
+
+    log(`\nOrthogonality checks:`);
+    log(`  tangent · normal = ${dot_tn.toFixed(6)} ${Math.abs(dot_tn) < 0.001 ? '✓' : '✗ FAIL'}`);
+    log(`  bitangent · normal = ${dot_bn.toFixed(6)} ${Math.abs(dot_bn) < 0.001 ? '✓' : '✗ FAIL'}`);
+    log(`  tangent · bitangent = ${dot_tb.toFixed(6)} ${Math.abs(dot_tb) < 0.001 ? '✓' : '✗ FAIL'}`);
+
+    // Check if this forms a right-handed coordinate system
+    const cross_tb = [
+        tangent[1] * bitangent[2] - tangent[2] * bitangent[1],
+        tangent[2] * bitangent[0] - tangent[0] * bitangent[2],
+        tangent[0] * bitangent[1] - tangent[1] * bitangent[0]
+    ];
+    const dot_cross_n = cross_tb[0]*n[0] + cross_tb[1]*n[1] + cross_tb[2]*n[2];
+    log(`  tangent × bitangent · normal = ${dot_cross_n.toFixed(6)} (should be 1 for right-handed)`);
+
+    // Now test: if we start with a point in XY plane and apply this matrix, where does it go?
+    log(`\nTest: Transform point (1, 0, 0) from local to world:`);
+    const testPoint = [1, 0, 0];
+    // Matrix multiplication: orientation * testPoint
+    // Column-major: [tangent | bitangent | normal]
+    const transformed = [
+        tangent[0] * testPoint[0] + bitangent[0] * testPoint[1] + n[0] * testPoint[2],
+        tangent[1] * testPoint[0] + bitangent[1] * testPoint[1] + n[1] * testPoint[2],
+        tangent[2] * testPoint[0] + bitangent[2] * testPoint[1] + n[2] * testPoint[2]
+    ];
+    log(`  Result: (${transformed[0].toFixed(4)}, ${transformed[1].toFixed(4)}, ${transformed[2].toFixed(4)})`);
+    log(`  This should be the tangent vector (new X axis)`);
+}
+
+log('Testing Orientation Matrix Algorithm');
+log('====================================\n');
+
+log('The shader builds an orthonormal basis from the frame normal.');
+log('This basis defines how the local XY frame is oriented in world space.\n');
+
+// Test with cardinal directions
+testOrientationMatrix([0, 0, 1], 'Normal: +Z (default)');
+testOrientationMatrix([1, 0, 0], 'Normal: +X');
+testOrientationMatrix([0, 1, 0], 'Normal: +Y');
+
+// Test with 45° angles
+testOrientationMatrix([0.707, 0, 0.707], 'Normal: 45° between +X and +Z');
+testOrientationMatrix([0, 0.707, 0.707], 'Normal: 45° between +Y and +Z');
+testOrientationMatrix([0.707, 0.707, 0], 'Normal: 45° between +X and +Y');
+
+// Test after rotation around Y by 45°
+// If we start with [0,0,1] and rotate around Y by 45°:
+// new_x = old_x * cos(45) + old_z * sin(45) = 0 * 0.707 + 1 * 0.707 = 0.707
+// new_z = -old_x * sin(45) + old_z * cos(45) = 0 * -0.707 + 1 * 0.707 = 0.707
+testOrientationMatrix([0.707, 0, 0.707], 'Normal: [0,0,1] rotated 45° around Y');
+
+// Test after 2x 45° = 90° around Y
+// [0,0,1] -> [1,0,0]
+testOrientationMatrix([1, 0, 0], 'Normal: [0,0,1] rotated 90° around Y');
+
+// Test consistency: three normals that should be orthogonal
+log('\n\n=== Testing Three Orthogonal Normals ===');
+const n1 = [0, 0, 1];
+const n2 = [0, 1, 0];
+const n3 = [1, 0, 0];
+
+log('These three normals form an orthogonal coordinate system:');
+log(`  n1 = (${n1[0]}, ${n1[1]}, ${n1[2]})`);
+log(`  n2 = (${n2[0]}, ${n2[1]}, ${n2[2]})`);
+log(`  n3 = (${n3[0]}, ${n3[1]}, ${n3[2]})`);
+
+// Now rotate all three by 45° around Y axis
+const cos45 = Math.cos(Math.PI / 4);
+const sin45 = Math.sin(Math.PI / 4);
+
+function rotateY(v, angle) {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    return [
+        v[0] * c + v[2] * s,
+        v[1],
+        -v[0] * s + v[2] * c
+    ];
+}
+
+const n1_rot = rotateY(n1, Math.PI / 4);
+const n2_rot = rotateY(n2, Math.PI / 4);
+const n3_rot = rotateY(n3, Math.PI / 4);
+
+log('\nAfter rotating 45° around Y:');
+log(`  n1' = (${n1_rot[0].toFixed(4)}, ${n1_rot[1].toFixed(4)}, ${n1_rot[2].toFixed(4)})`);
+log(`  n2' = (${n2_rot[0].toFixed(4)}, ${n2_rot[1].toFixed(4)}, ${n2_rot[2].toFixed(4)})`);
+log(`  n3' = (${n3_rot[0].toFixed(4)}, ${n3_rot[1].toFixed(4)}, ${n3_rot[2].toFixed(4)})`);
+
+// Check if still orthogonal
+const dot12 = n1_rot[0]*n2_rot[0] + n1_rot[1]*n2_rot[1] + n1_rot[2]*n2_rot[2];
+const dot13 = n1_rot[0]*n3_rot[0] + n1_rot[1]*n3_rot[1] + n1_rot[2]*n3_rot[2];
+const dot23 = n2_rot[0]*n3_rot[0] + n2_rot[1]*n3_rot[1] + n2_rot[2]*n3_rot[2];
+
+log('\nOrthogonality after rotation:');
+log(`  n1' · n2' = ${dot12.toFixed(6)} ${Math.abs(dot12) < 0.001 ? '✓' : '✗'}`);
+log(`  n1' · n3' = ${dot13.toFixed(6)} ${Math.abs(dot13) < 0.001 ? '✓' : '✗'}`);
+log(`  n2' · n3' = ${dot23.toFixed(6)} ${Math.abs(dot23) < 0.001 ? '✓' : '✗'}`);
+
+log('\n\nKEY INSIGHT:');
+log('============');
+log('When we rotate orthogonal normals, they REMAIN orthogonal.');
+log('The orientation matrix algorithm should preserve this.');
+log('If frames LOOK non-orthogonal but normals ARE orthogonal,');
+log('the issue is how the shader interprets roll + orientation together.');
+
+</script>
+</body>
+</html>
