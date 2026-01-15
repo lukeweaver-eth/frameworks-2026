@@ -6,19 +6,49 @@
  * Handles keyboard input and modifies framework state
  */
 class CommandExecutor {
-    constructor(framework, paletteManager, renderer = null, commandTree = null) {
+    constructor(framework, paletteManager, renderer = null, commandTree = null, colorContext = null, cameraContext = null, selectionContext = null) {
         this.framework = framework;
         this.palette = paletteManager;
         this.renderer = renderer; // Optional: for view switching
         this.commandTree = commandTree; // Optional: for command tree navigation
+        this.colorContext = colorContext; // Optional: for color context navigation
+        this.cameraContext = cameraContext; // Optional: for camera context navigation
+        this.selectionContext = selectionContext; // Optional: for frame selection context
         this.lastCommand = '';
+        this.cornerIndex = 0; // Current corner position (0-7)
+        this.uiVisible = true; // Track UI visibility state
+
+        // Animation state
+        this.animationActive = false; // Whether animation is running
+        this.animationDirection = null; // Direction: 'i', 'j', 'k', 'l'
+        this.animationInterval = 500; // Time between color shifts in ms (30/60s = 0.5s)
+        this.animationTimer = 0; // Accumulator for time
+        this.animationStep = 1000/60; // Step size for speed adjustment (1/60s in ms)
+        this.animationMinInterval = 1000/60; // Fastest: 1/60s
+        this.animationMaxInterval = 50*1000/60; // Slowest: 50/60s
     }
 
     /**
      * Execute a single-character command
      */
-    executeKey(key) {
+    executeKey(key, shift = false) {
         const fw = this.framework;
+        console.log('executeKey called - key:', key, 'shift:', shift, 'mode:', fw.mode);
+
+        // If camera context is enabled and active
+        if (this.cameraContext && this.cameraContext.active) {
+            return this.handleCameraContextNavigation(key, shift);
+        }
+
+        // If color context is enabled and active
+        if (this.colorContext && this.colorContext.active) {
+            return this.handleColorContextNavigation(key);
+        }
+
+        // If selection context is enabled and active
+        if (this.selectionContext && this.selectionContext.active) {
+            return this.handleSelectionContextNavigation(key, shift);
+        }
 
         // If command tree is enabled and we're in command context mode
         if (this.commandTree && this.commandTree.inCommandContext) {
@@ -26,7 +56,27 @@ class CommandExecutor {
         }
 
         // Mode-dependent commands (ijkl)
-        if (fw.mode === 'translate') {
+        if (fw.mode === 'animation') {
+            console.log('Animation mode - key:', key, 'shift:', shift);
+            // If in animation mode, check if key is ijkl or JL (speed control)
+            if (['i', 'j', 'k', 'l'].includes(key.toLowerCase())) {
+                // Check if shift is pressed for speed control
+                if ((key === 'J' || (key === 'j' && shift))) {
+                    console.log('Speed up detected!');
+                    return this.handleAnimationSpeedUp();
+                } else if ((key === 'L' || (key === 'l' && shift))) {
+                    console.log('Slow down detected!');
+                    return this.handleAnimationSlowDown();
+                } else {
+                    // Regular direction keys (no shift)
+                    console.log('Direction key:', key.toLowerCase());
+                    return this.handleAnimationDirection(key.toLowerCase());
+                }
+            }
+            // Any other key exits animation mode and executes normally
+            fw.mode = 'normal';
+            console.log('Exiting animation mode');
+        } else if (fw.mode === 'translate') {
             // If in translate mode, check if key is ijkl
             if (['i', 'j', 'k', 'l'].includes(key)) {
                 return this.handleTranslate(key);
@@ -121,6 +171,9 @@ class CommandExecutor {
             case 'z':
                 fw.cursor.snapToOrigin();
                 break;
+            case 'Z':
+                this.centerStructureToCursor();
+                break;
             case ' ':
                 this.snapSelectionToCursor();
                 break;
@@ -130,9 +183,55 @@ class CommandExecutor {
                 this.deleteSelected();
                 break;
 
-            // Color
+            // Color context
             case 'p':
-                this.cycleColorForward();
+                if (this.colorContext) {
+                    this.colorContext.enter();
+                    // Reset mode when entering color context
+                    fw.mode = 'normal';
+                    console.log('Entered color context');
+                } else {
+                    // Fallback to cycle color if no context
+                    this.cycleColorForward();
+                }
+                break;
+
+            // Frame selection context
+            case '#':
+                if (this.selectionContext) {
+                    this.selectionContext.enter();
+                    // Reset mode when entering selection context
+                    fw.mode = 'normal';
+                    console.log('Entered frame selection context');
+                }
+                break;
+
+            // Corner cycling
+            case 'q':
+                this.cycleCorner();
+                break;
+
+            // Toggle UI visibility
+            case '?':
+                this.toggleUI();
+                break;
+
+            // Camera context
+            case 'v':
+                if (this.cameraContext) {
+                    this.cameraContext.enter();
+                    // Reset mode when entering camera context
+                    fw.mode = 'normal';
+                    console.log('Entered camera context');
+                } else {
+                    console.log('Camera context not enabled');
+                }
+                break;
+
+            // Animation mode
+            case 'm':
+                fw.mode = 'animation';
+                console.log('Animation mode - press i/j/k/l to set direction');
                 break;
 
             // Command context (undo/fork navigation)
@@ -149,7 +248,7 @@ class CommandExecutor {
                 }
                 break;
 
-            // Views (0 = spatial, 1-6 = orthographic)
+            // View selection (for transformation plane, not camera position)
             case '0':
             case '1':
             case '2':
@@ -157,7 +256,8 @@ class CommandExecutor {
             case '4':
             case '5':
             case '6':
-                this.setView(parseInt(key));
+                fw.currentView = parseInt(key);
+                console.log('Transformation view:', fw.currentView);
                 break;
 
             // Escape - exit modes
@@ -552,6 +652,319 @@ class CommandExecutor {
     }
 
     /**
+     * Center entire structure to cursor (Z command)
+     * Calculates bounding box of all frames and translates everything
+     * so the center of the bounding box aligns with the cursor
+     */
+    centerStructureToCursor() {
+        const fw = this.framework;
+
+        if (fw.frames.length === 0) {
+            console.log('No frames to center');
+            return;
+        }
+
+        // Get bounding box of all frames
+        const bbox = fw.getBoundingBox();
+
+        // Calculate offset to move structure center to cursor
+        const dx = fw.cursor.x - bbox.centerX;
+        const dy = fw.cursor.y - bbox.centerY;
+        const dz = fw.cursor.z - bbox.centerZ;
+
+        // Translate all frames
+        fw.frames.forEach(frame => {
+            frame.translate(dx, dy, dz);
+        });
+
+        console.log(`Centered structure to cursor: bbox center (${bbox.centerX.toFixed(2)}, ${bbox.centerY.toFixed(2)}, ${bbox.centerZ.toFixed(2)}) → cursor (${fw.cursor.x}, ${fw.cursor.y}, ${fw.cursor.z})`);
+    }
+
+    /**
+     * Get corner coordinates based on current view and corner index
+     * Corner order: TR-near, TL-near, BL-near, BR-near, TR-far, TL-far, BL-far, BR-far
+     *
+     * @param {number} cornerIndex - Corner index (0-7)
+     * @returns {object} - {x, y, z} coordinates of the corner
+     */
+    getCornerCoordinates(cornerIndex) {
+        const bbox = this.framework.getBoundingBox();
+        const view = this.framework.currentView;
+
+        // Define corner patterns based on view
+        // Pattern: [near/far axis, top/bottom, left/right]
+        const corners = [];
+
+        switch (view) {
+            case 0: // Spatial - default to front view
+            case 1: // Front view (camera at +Z, looking at -Z)
+                // Near = maxZ, Far = minZ
+                // Right = maxX, Left = minX
+                // Top = maxY, Bottom = minY
+                corners[0] = {x: bbox.maxX, y: bbox.maxY, z: bbox.maxZ}; // TR-near
+                corners[1] = {x: bbox.minX, y: bbox.maxY, z: bbox.maxZ}; // TL-near
+                corners[2] = {x: bbox.minX, y: bbox.minY, z: bbox.maxZ}; // BL-near
+                corners[3] = {x: bbox.maxX, y: bbox.minY, z: bbox.maxZ}; // BR-near
+                corners[4] = {x: bbox.maxX, y: bbox.maxY, z: bbox.minZ}; // TR-far
+                corners[5] = {x: bbox.minX, y: bbox.maxY, z: bbox.minZ}; // TL-far
+                corners[6] = {x: bbox.minX, y: bbox.minY, z: bbox.minZ}; // BL-far
+                corners[7] = {x: bbox.maxX, y: bbox.minY, z: bbox.minZ}; // BR-far
+                break;
+
+            case 2: // Right view (camera at +X, looking at -X)
+                // Near = maxX, Far = minX
+                // Right = minZ, Left = maxZ (right-hand rule: -X × +Y = -Z)
+                // Top = maxY, Bottom = minY
+                corners[0] = {x: bbox.maxX, y: bbox.maxY, z: bbox.minZ}; // TR-near
+                corners[1] = {x: bbox.maxX, y: bbox.maxY, z: bbox.maxZ}; // TL-near
+                corners[2] = {x: bbox.maxX, y: bbox.minY, z: bbox.maxZ}; // BL-near
+                corners[3] = {x: bbox.maxX, y: bbox.minY, z: bbox.minZ}; // BR-near
+                corners[4] = {x: bbox.minX, y: bbox.maxY, z: bbox.minZ}; // TR-far
+                corners[5] = {x: bbox.minX, y: bbox.maxY, z: bbox.maxZ}; // TL-far
+                corners[6] = {x: bbox.minX, y: bbox.minY, z: bbox.maxZ}; // BL-far
+                corners[7] = {x: bbox.minX, y: bbox.minY, z: bbox.minZ}; // BR-far
+                break;
+
+            case 3: // Back view (camera at -Z, looking at +Z)
+                // Near = minZ, Far = maxZ
+                // Right = minX (flipped), Left = maxX
+                // Top = maxY, Bottom = minY
+                corners[0] = {x: bbox.minX, y: bbox.maxY, z: bbox.minZ}; // TR-near
+                corners[1] = {x: bbox.maxX, y: bbox.maxY, z: bbox.minZ}; // TL-near
+                corners[2] = {x: bbox.maxX, y: bbox.minY, z: bbox.minZ}; // BL-near
+                corners[3] = {x: bbox.minX, y: bbox.minY, z: bbox.minZ}; // BR-near
+                corners[4] = {x: bbox.minX, y: bbox.maxY, z: bbox.maxZ}; // TR-far
+                corners[5] = {x: bbox.maxX, y: bbox.maxY, z: bbox.maxZ}; // TL-far
+                corners[6] = {x: bbox.maxX, y: bbox.minY, z: bbox.maxZ}; // BL-far
+                corners[7] = {x: bbox.minX, y: bbox.minY, z: bbox.maxZ}; // BR-far
+                break;
+
+            case 4: // Left view (camera at -X, looking at +X)
+                // Near = minX, Far = maxX
+                // Right = maxZ, Left = minZ (right-hand rule: +X × +Y = +Z)
+                // Top = maxY, Bottom = minY
+                corners[0] = {x: bbox.minX, y: bbox.maxY, z: bbox.maxZ}; // TR-near
+                corners[1] = {x: bbox.minX, y: bbox.maxY, z: bbox.minZ}; // TL-near
+                corners[2] = {x: bbox.minX, y: bbox.minY, z: bbox.minZ}; // BL-near
+                corners[3] = {x: bbox.minX, y: bbox.minY, z: bbox.maxZ}; // BR-near
+                corners[4] = {x: bbox.maxX, y: bbox.maxY, z: bbox.maxZ}; // TR-far
+                corners[5] = {x: bbox.maxX, y: bbox.maxY, z: bbox.minZ}; // TL-far
+                corners[6] = {x: bbox.maxX, y: bbox.minY, z: bbox.minZ}; // BL-far
+                corners[7] = {x: bbox.maxX, y: bbox.minY, z: bbox.maxZ}; // BR-far
+                break;
+
+            case 5: // Top view (camera at +Y, looking at -Y)
+                // Near = maxY, Far = minY
+                // Right = maxX, Left = minX
+                // Top = minZ (up in view when looking down), Bottom = maxZ
+                corners[0] = {x: bbox.maxX, y: bbox.maxY, z: bbox.minZ}; // TR-near
+                corners[1] = {x: bbox.minX, y: bbox.maxY, z: bbox.minZ}; // TL-near
+                corners[2] = {x: bbox.minX, y: bbox.maxY, z: bbox.maxZ}; // BL-near
+                corners[3] = {x: bbox.maxX, y: bbox.maxY, z: bbox.maxZ}; // BR-near
+                corners[4] = {x: bbox.maxX, y: bbox.minY, z: bbox.minZ}; // TR-far
+                corners[5] = {x: bbox.minX, y: bbox.minY, z: bbox.minZ}; // TL-far
+                corners[6] = {x: bbox.minX, y: bbox.minY, z: bbox.maxZ}; // BL-far
+                corners[7] = {x: bbox.maxX, y: bbox.minY, z: bbox.maxZ}; // BR-far
+                break;
+
+            case 6: // Bottom view (camera at -Y, looking at +Y)
+                // Near = minY, Far = maxY
+                // Right = maxX, Left = minX
+                // Top = maxZ (up in view when looking up), Bottom = minZ
+                corners[0] = {x: bbox.maxX, y: bbox.minY, z: bbox.maxZ}; // TR-near
+                corners[1] = {x: bbox.minX, y: bbox.minY, z: bbox.maxZ}; // TL-near
+                corners[2] = {x: bbox.minX, y: bbox.minY, z: bbox.minZ}; // BL-near
+                corners[3] = {x: bbox.maxX, y: bbox.minY, z: bbox.minZ}; // BR-near
+                corners[4] = {x: bbox.maxX, y: bbox.maxY, z: bbox.maxZ}; // TR-far
+                corners[5] = {x: bbox.minX, y: bbox.maxY, z: bbox.maxZ}; // TL-far
+                corners[6] = {x: bbox.minX, y: bbox.maxY, z: bbox.minZ}; // BL-far
+                corners[7] = {x: bbox.maxX, y: bbox.maxY, z: bbox.minZ}; // BR-far
+                break;
+        }
+
+        return corners[cornerIndex % 8];
+    }
+
+    /**
+     * Cycle to next corner and move cursor there
+     */
+    cycleCorner() {
+        const fw = this.framework;
+
+        if (fw.frames.length === 0) {
+            console.log('No frames - cannot cycle corners');
+            return;
+        }
+
+        // Get current corner coordinates
+        const corner = this.getCornerCoordinates(this.cornerIndex);
+
+        // Move cursor to corner
+        fw.cursor.x = corner.x;
+        fw.cursor.y = corner.y;
+        fw.cursor.z = corner.z;
+
+        console.log(`Moved cursor to corner ${this.cornerIndex}: (${corner.x.toFixed(2)}, ${corner.y.toFixed(2)}, ${corner.z.toFixed(2)})`);
+
+        // Increment corner index (wraps 0-7)
+        this.cornerIndex = (this.cornerIndex + 1) % 8;
+    }
+
+    /**
+     * Toggle UI visibility (cursor, view helpers, panels)
+     */
+    toggleUI() {
+        this.uiVisible = !this.uiVisible;
+
+        // Update renderer if available
+        if (this.renderer && this.renderer.setUIVisible) {
+            this.renderer.setUIVisible(this.uiVisible);
+        }
+
+        console.log('UI visibility:', this.uiVisible ? 'shown' : 'hidden');
+    }
+
+    /**
+     * Handle animation direction (i/j/k/l in animation mode)
+     * Toggle animation on/off with the specified direction
+     */
+    handleAnimationDirection(key) {
+        const fw = this.framework;
+
+        // If already animating in this direction, stop animation and exit animation mode
+        if (this.animationActive && this.animationDirection === key) {
+            this.animationActive = false;
+            this.animationDirection = null;
+            this.animationTimer = 0;
+            console.log('Animation stopped');
+            fw.mode = 'normal';
+        } else {
+            // Start/change animation direction
+            this.animationActive = true;
+            this.animationDirection = key;
+            this.animationTimer = 0;
+
+            const directions = {
+                'i': 'up (next palette color)',
+                'k': 'down (previous palette color)',
+                'j': 'left (structure backward)',
+                'l': 'right (structure forward)'
+            };
+            console.log('Animation started:', directions[key], `at ${this.animationInterval.toFixed(1)}ms interval`);
+            // Keep animation mode active so user can adjust speed with J/L
+            // (don't set fw.mode = 'normal' here)
+        }
+
+        // Record command
+        fw.commandHistory.push(key);
+        if (this.commandTree && !this.commandTree.inCommandContext) {
+            this.commandTree.addCommand(key);
+        }
+    }
+
+    /**
+     * Speed up animation (J in animation mode)
+     * Decrease interval by 1/60s
+     */
+    handleAnimationSpeedUp() {
+        const fw = this.framework;
+
+        // Decrease interval (faster)
+        this.animationInterval = Math.max(
+            this.animationMinInterval,
+            this.animationInterval - this.animationStep
+        );
+
+        const fps = (1000 / this.animationInterval).toFixed(1);
+        console.log(`Animation speed: ${this.animationInterval.toFixed(1)}ms (${fps} shifts/sec)`);
+
+        // Record command
+        fw.commandHistory.push('J');
+        if (this.commandTree && !this.commandTree.inCommandContext) {
+            this.commandTree.addCommand('J');
+        }
+    }
+
+    /**
+     * Slow down animation (L in animation mode)
+     * Increase interval by 1/60s
+     */
+    handleAnimationSlowDown() {
+        const fw = this.framework;
+
+        // Increase interval (slower)
+        this.animationInterval = Math.min(
+            this.animationMaxInterval,
+            this.animationInterval + this.animationStep
+        );
+
+        const fps = (1000 / this.animationInterval).toFixed(1);
+        console.log(`Animation speed: ${this.animationInterval.toFixed(1)}ms (${fps} shifts/sec)`);
+
+        // Record command
+        fw.commandHistory.push('L');
+        if (this.commandTree && !this.commandTree.inCommandContext) {
+            this.commandTree.addCommand('L');
+        }
+    }
+
+    /**
+     * Update animation timer and execute color shifts
+     * Called from main animation loop with deltaTime in ms
+     */
+    updateAnimation(deltaTime) {
+        if (!this.animationActive || !this.animationDirection) {
+            return;
+        }
+
+        // Accumulate time
+        this.animationTimer += deltaTime;
+
+        // Check if it's time to execute a color shift
+        if (this.animationTimer >= this.animationInterval) {
+            this.animationTimer -= this.animationInterval;
+
+            // Execute color shift via color context
+            if (this.colorContext) {
+                const fw = this.framework;
+
+                // Apply to ALL frames (not just selected)
+                if (fw.frames.length > 0) {
+                    // For each frame, shift its color in the specified direction
+                    fw.frames.forEach(frame => {
+                        // Find current color index in palette
+                        const frameColor = frame.color.toUpperCase();
+                        const currentIndex = this.colorContext.colors.findIndex(c => c.toUpperCase() === frameColor);
+
+                        if (currentIndex >= 0) {
+                            let newIndex = currentIndex;
+
+                            // Apply direction shift
+                            switch (this.animationDirection) {
+                                case 'l': // Right (+1)
+                                    newIndex = (currentIndex + 1) % this.colorContext.numColors;
+                                    break;
+                                case 'j': // Left (-1)
+                                    newIndex = (currentIndex - 1 + this.colorContext.numColors) % this.colorContext.numColors;
+                                    break;
+                                case 'k': // Down (+8)
+                                    newIndex = (currentIndex + this.colorContext.cols) % this.colorContext.numColors;
+                                    break;
+                                case 'i': // Up (-8)
+                                    newIndex = (currentIndex - this.colorContext.cols + this.colorContext.numColors) % this.colorContext.numColors;
+                                    break;
+                            }
+
+                            frame.color = this.colorContext.colors[newIndex];
+                        }
+                    });
+                    console.log('Animated', fw.frames.length, 'frames in direction:', this.animationDirection);
+                }
+            }
+        }
+    }
+
+    /**
      * Cycle to next color in palette
      */
     cycleColorForward() {
@@ -755,11 +1168,85 @@ class CommandExecutor {
     }
 
     /**
+     * Expand repeat notation: (command,count)
+     * Supports nesting: (d(R2R1,23),81)
+     *
+     * @param {string} cmdString - Command string with optional repeat notation
+     * @returns {string} - Expanded command string without repeat notation
+     */
+    expandRepeats(cmdString) {
+        let result = '';
+        let i = 0;
+
+        while (i < cmdString.length) {
+            if (cmdString[i] === '(') {
+                // Find matching closing paren and comma separator
+                let depth = 0;
+                let commaPos = -1;
+                let j = i;
+
+                while (j < cmdString.length) {
+                    if (cmdString[j] === '(') depth++;
+                    if (cmdString[j] === ')') {
+                        depth--;
+                        if (depth === 0) break;
+                    }
+                    // Find comma at depth 1 (directly inside this group)
+                    if (cmdString[j] === ',' && depth === 1) {
+                        commaPos = j;
+                    }
+                    j++;
+                }
+
+                if (commaPos === -1) {
+                    console.warn('Invalid repeat syntax: no comma found in group');
+                    result += cmdString[i];
+                    i++;
+                    continue;
+                }
+
+                // Extract command and count
+                const command = cmdString.substring(i + 1, commaPos);
+                const countStr = cmdString.substring(commaPos + 1, j);
+                const count = parseInt(countStr);
+
+                if (isNaN(count)) {
+                    console.warn('Invalid repeat count:', countStr);
+                    result += cmdString[i];
+                    i++;
+                    continue;
+                }
+
+                // Recursively expand the inner command, then repeat it
+                const expandedCommand = this.expandRepeats(command);
+                result += expandedCommand.repeat(count);
+
+                i = j + 1; // Skip past the closing paren
+            } else {
+                // Regular character
+                result += cmdString[i];
+                i++;
+            }
+        }
+
+        return result;
+    }
+
+    /**
      * Execute a command string (for replay)
+     * Supports repeat notation: (command,count)
      */
     executeCommandString(cmdString) {
-        for (let i = 0; i < cmdString.length; i++) {
-            this.executeKey(cmdString[i]);
+        // First expand any repeat notation
+        const expanded = this.expandRepeats(cmdString);
+        console.log('Executing command string:', cmdString);
+        if (cmdString !== expanded) {
+            console.log('Expanded to:', expanded);
+        }
+
+        // Execute each character
+        for (let i = 0; i < expanded.length; i++) {
+            this.executeKey(expanded[i]);
         }
     }
 
@@ -822,6 +1309,210 @@ class CommandExecutor {
                 tree.moveDown();
                 this.reconstructState();
                 break;
+        }
+    }
+
+    /**
+     * Handle camera context navigation (numbers + ijkl in camera context mode)
+     */
+    handleCameraContextNavigation(key, shift = false) {
+        const ctx = this.cameraContext;
+        const fw = this.framework;
+
+        // Check if this is a number key (view selection)
+        if (['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(key)) {
+            ctx.selectView(parseInt(key));
+
+            // Record in command tree
+            fw.commandHistory.push(key);
+            if (this.commandTree && !this.commandTree.inCommandContext) {
+                this.commandTree.addCommand(key);
+            }
+            return;
+        }
+
+        // Check if this is a navigation key (zoom/FOV)
+        const isNavKey = ['i', 'I', 'j', 'k', 'K', 'l'].includes(key);
+
+        if (isNavKey) {
+            // Navigate (zoom/FOV adjustments)
+            const lowerKey = key.toLowerCase();
+            const isShift = key !== lowerKey || shift;
+            ctx.navigate(lowerKey, isShift);
+
+            // Record navigation in command tree
+            fw.commandHistory.push(key);
+            if (this.commandTree && !this.commandTree.inCommandContext) {
+                this.commandTree.addCommand(key);
+            }
+            return;
+        }
+
+        // Check if pressing 'v' again (exit)
+        if (key === 'v') {
+            ctx.exit();
+
+            // Record command
+            fw.commandHistory.push(key);
+            if (this.commandTree && !this.commandTree.inCommandContext) {
+                this.commandTree.addCommand(key);
+            }
+            return;
+        }
+
+        // Any other key exits camera context and continues
+        ctx.exit();
+
+        // Let the key execute normally
+        fw.mode = 'normal';
+        this.executeKeyNormal(key);
+
+        // Record command
+        fw.commandHistory.push(key);
+        if (this.commandTree && !this.commandTree.inCommandContext) {
+            this.commandTree.addCommand(key);
+        }
+    }
+
+    /**
+     * Handle color context navigation (ijkl in color context mode)
+     */
+    handleColorContextNavigation(key) {
+        const ctx = this.colorContext;
+        const fw = this.framework;
+
+        // Check if this is a navigation key
+        const isNavKey = ['i', 'j', 'k', 'l'].includes(key);
+
+        if (isNavKey) {
+            // Navigate in color space
+            ctx.navigate(key);
+
+            // Record navigation in command tree
+            fw.commandHistory.push(key);
+            if (this.commandTree && !this.commandTree.inCommandContext) {
+                this.commandTree.addCommand(key);
+            }
+            return;
+        }
+
+        // Check if pressing 'p' again (exit and apply)
+        if (key === 'p') {
+            ctx.apply();
+            ctx.exit();
+
+            // Record command
+            fw.commandHistory.push(key);
+            if (this.commandTree && !this.commandTree.inCommandContext) {
+                this.commandTree.addCommand(key);
+            }
+            return;
+        }
+
+        // Any other key exits color context and continues
+        ctx.apply();
+        ctx.exit();
+
+        // Let the key execute normally
+        fw.mode = 'normal';
+        this.executeKeyNormal(key);
+
+        // Record command
+        fw.commandHistory.push(key);
+        if (this.commandTree && !this.commandTree.inCommandContext) {
+            this.commandTree.addCommand(key);
+        }
+    }
+
+    /**
+     * Handle selection context navigation (ijkl/JL and [] in selection context mode)
+     */
+    handleSelectionContextNavigation(key, shift = false) {
+        const ctx = this.selectionContext;
+        const fw = this.framework;
+
+        // Check if opening bracket input
+        if (key === '[') {
+            ctx.openBracketInput();
+            // Show bracket input UI (via global function that sets the active flag)
+            if (typeof window.openBracketInput === 'function') {
+                window.openBracketInput();
+            }
+            return;
+        }
+
+        // Check if this is a navigation key (ijkl)
+        const isNavKey = ['i', 'j', 'k', 'l'].includes(key.toLowerCase());
+
+        if (isNavKey) {
+            const lowerKey = key.toLowerCase();
+            const isShift = key !== lowerKey || shift;
+
+            if (isShift && (lowerKey === 'j' || lowerKey === 'l')) {
+                // Shift operations (J/L) - contract bounds
+                if (lowerKey === 'j') {
+                    ctx.contractLower();
+                } else if (lowerKey === 'l') {
+                    ctx.contractUpper();
+                }
+            } else if (isShift && (lowerKey === 'i' || lowerKey === 'k')) {
+                // TODO: I/K operations - available for new functions
+                console.log('I/K pressed - not yet implemented');
+            } else {
+                // Regular navigation (ijkl)
+                switch (lowerKey) {
+                    case 'l': // Expand upward
+                        ctx.expandUp();
+                        break;
+                    case 'j': // Expand downward
+                        ctx.expandDown();
+                        break;
+                    case 'i': // Shift selection up
+                        ctx.shiftUp();
+                        break;
+                    case 'k': // Shift selection down
+                        ctx.shiftDown();
+                        break;
+                }
+            }
+
+            // Record navigation
+            fw.commandHistory.push(key);
+            if (this.commandTree && !this.commandTree.inCommandContext) {
+                this.commandTree.addCommand(key);
+            }
+            return;
+        }
+
+        // Check if 'a' (select all same color)
+        if (key === 'a') {
+            ctx.selectAllSameColor();
+            fw.commandHistory.push(key);
+            if (this.commandTree && !this.commandTree.inCommandContext) {
+                this.commandTree.addCommand(key);
+            }
+            return;
+        }
+
+        // Check if pressing '#' again (exit)
+        if (key === '#') {
+            ctx.exit();
+            fw.commandHistory.push(key);
+            if (this.commandTree && !this.commandTree.inCommandContext) {
+                this.commandTree.addCommand(key);
+            }
+            return;
+        }
+
+        // Any other key exits selection context and continues
+        ctx.exit();
+        fw.mode = 'normal';
+        this.executeKeyNormal(key);
+
+        // Record command
+        fw.commandHistory.push(key);
+        if (this.commandTree && !this.commandTree.inCommandContext) {
+            this.commandTree.addCommand(key);
         }
     }
 
@@ -930,11 +1621,20 @@ class CommandExecutor {
             case 'z':
                 fw.cursor.snapToOrigin();
                 break;
+            case 'Z':
+                this.centerStructureToCursor();
+                break;
             case ' ':
                 this.snapSelectionToCursor();
                 break;
             case 'p':
                 this.cycleColorForward();
+                break;
+            case 'q':
+                this.cycleCorner();
+                break;
+            case '?':
+                this.toggleUI();
                 break;
             case '0':
             case '1':
@@ -943,7 +1643,7 @@ class CommandExecutor {
             case '4':
             case '5':
             case '6':
-                this.setView(parseInt(key));
+                fw.currentView = parseInt(key);
                 break;
             case 'Escape':
                 fw.mode = 'normal';

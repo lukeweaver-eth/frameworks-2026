@@ -289,6 +289,48 @@ class Framework {
     selectAll() {
         this.frames.forEach(f => f.selected = true);
     }
+
+    /**
+     * Get bounding box of all frames
+     * Returns { minX, maxX, minY, maxY, minZ, maxZ, centerX, centerY, centerZ }
+     * For now, uses simple approximation: position ± size/2
+     * TODO: Add proper orientation-based bounding box calculation
+     */
+    getBoundingBox() {
+        if (this.frames.length === 0) {
+            return {
+                minX: 0, maxX: 0,
+                minY: 0, maxY: 0,
+                minZ: 0, maxZ: 0,
+                centerX: 0, centerY: 0, centerZ: 0
+            };
+        }
+
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        let minZ = Infinity, maxZ = -Infinity;
+
+        this.frames.forEach(frame => {
+            const halfSize = frame.size / 2;
+
+            // Simple approximation: treat each frame as a cube
+            minX = Math.min(minX, frame.x - halfSize);
+            maxX = Math.max(maxX, frame.x + halfSize);
+            minY = Math.min(minY, frame.y - halfSize);
+            maxY = Math.max(maxY, frame.y + halfSize);
+            minZ = Math.min(minZ, frame.z - halfSize);
+            maxZ = Math.max(maxZ, frame.z + halfSize);
+        });
+
+        return {
+            minX, maxX,
+            minY, maxY,
+            minZ, maxZ,
+            centerX: (minX + maxX) / 2,
+            centerY: (minY + maxY) / 2,
+            centerZ: (minZ + maxZ) / 2
+        };
+    }
 }
 
 // Export for use in other modules

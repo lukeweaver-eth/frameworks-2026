@@ -227,6 +227,129 @@
             padding: 2px 6px;
             border-radius: 3px;
         }
+
+        /* Frame selection bracket input overlay */
+        #bracket-input-overlay {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.95);
+            border: 2px solid #FFA07A;
+            border-radius: 8px;
+            padding: 20px 30px;
+            display: none;
+            z-index: 1000;
+            min-width: 400px;
+        }
+
+        #bracket-input-overlay.active {
+            display: block;
+        }
+
+        #bracket-input-overlay h3 {
+            color: #FFA07A;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+
+        #bracket-input {
+            width: 100%;
+            background: #0a0a0a;
+            border: 1px solid #FFA07A;
+            border-radius: 5px;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            color: #fff;
+            outline: none;
+        }
+
+        #bracket-input-help {
+            margin-top: 10px;
+            color: #888;
+            font-size: 11px;
+        }
+
+        #bracket-input-help code {
+            color: #FFA07A;
+            background: rgba(255, 160, 122, 0.1);
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+
+        /* Color palette - persistent frame-style UI in lower right */
+        #color-palette-overlay {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 100;
+            pointer-events: none;
+        }
+
+        #color-palette-frame {
+            /* Outer frame container - subtle by default */
+            width: 184px;
+            height: 232px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(0, 0, 0, 0.6);
+            padding: 8px;
+            position: relative;
+            transition: all 0.2s;
+        }
+
+        #color-palette-overlay.active #color-palette-frame {
+            /* Highlight outer frame when context active */
+            border: 3px solid #4ECDC4;
+            background: rgba(0, 0, 0, 0.9);
+            box-shadow: 0 0 20px rgba(78, 205, 196, 0.6);
+        }
+
+        #color-palette-grid {
+            display: grid;
+            grid-template-columns: repeat(8, 18px);
+            grid-template-rows: repeat(10, 18px);
+            gap: 2px;  /* 1 frame space between colors */
+            width: 100%;
+            height: 100%;
+        }
+
+        .color-cell {
+            /* Each color frame - actual frame shape, subtle by default */
+            width: 18px;
+            height: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+            transition: all 0.15s;
+            opacity: 0.7;
+        }
+
+        /* Highlight all color cells when context is active */
+        #color-palette-overlay.active .color-cell {
+            border-color: rgba(78, 205, 196, 0.5);
+            box-shadow: 0 0 5px rgba(78, 205, 196, 0.4);
+            opacity: 1;
+        }
+
+        /* Current color cursor */
+        .color-cell.current {
+            border: 2px solid #4ECDC4;
+            box-shadow: 0 0 8px rgba(78, 205, 196, 1), inset 0 0 8px rgba(78, 205, 196, 0.4);
+            transform: scale(1.15);
+            z-index: 10;
+        }
+
+        /* Selected frame color indicator */
+        .color-cell.selected-frame-color {
+            border: 2px solid #FFA07A;
+            box-shadow: 0 0 6px rgba(255, 160, 122, 0.8);
+        }
+
+        /* Current + selected (both indicators) */
+        .color-cell.current.selected-frame-color {
+            border: 2px solid #4ECDC4;
+            box-shadow: 0 0 8px rgba(78, 205, 196, 1), 0 0 6px rgba(255, 160, 122, 0.8);
+        }
     </style>
 </head>
 <body>
@@ -268,8 +391,7 @@
 
     <div id="help">
         <h3>Commands</h3>
-        <div class="cmd"><span class="key">0</span><span class="desc">spatial view</span></div>
-        <div class="cmd"><span class="key">1-6</span><span class="desc">ortho views</span></div>
+        <div class="cmd"><span class="key">0-6</span><span class="desc">set work plane</span></div>
         <div class="cmd"><span class="key">f</span><span class="desc">create frame</span></div>
         <div class="cmd"><span class="key">d</span><span class="desc">duplicate</span></div>
         <div class="cmd"><span class="key">x</span><span class="desc">delete</span></div>
@@ -280,26 +402,62 @@
         <div class="cmd"><span class="key">r/R</span><span class="desc">rotate 90°/45°</span></div>
         <div class="cmd"><span class="key">e/E</span><span class="desc">reflect H/V</span></div>
         <div class="cmd"><span class="key">a/A</span><span class="desc">select color/all</span></div>
-        <div class="cmd"><span class="key">z</span><span class="desc">cursor to origin</span></div>
+        <div class="cmd"><span class="key">z/Z</span><span class="desc">cursor/struct→origin</span></div>
+        <div class="cmd"><span class="key">q</span><span class="desc">cycle corners</span></div>
         <div class="cmd"><span class="key">space</span><span class="desc">snap to cursor</span></div>
-        <div class="cmd"><span class="key">p</span><span class="desc">cycle color</span></div>
+        <div class="cmd"><span class="key">v</span><span class="desc">camera context</span></div>
+        <div class="cmd"><span class="key">v0-9</span><span class="desc">camera snap</span></div>
+        <div class="cmd"><span class="key">v8</span><span class="desc">toggle ortho</span></div>
+        <div class="cmd"><span class="key">vi/I</span><span class="desc">zoom in 5/10</span></div>
+        <div class="cmd"><span class="key">vk/K</span><span class="desc">zoom out 5/10</span></div>
+        <div class="cmd"><span class="key">vj/J</span><span class="desc">FOV +5°/+10°</span></div>
+        <div class="cmd"><span class="key">vl/L</span><span class="desc">FOV -5°/-10°</span></div>
+        <div class="cmd"><span class="key">p</span><span class="desc">color context</span></div>
+        <div class="cmd"><span class="key">m</span><span class="desc">animate colors</span></div>
+        <div class="cmd"><span class="key">mi/k</span><span class="desc">anim up/down</span></div>
+        <div class="cmd"><span class="key">mj/l</span><span class="desc">anim left/right</span></div>
+        <div class="cmd"><span class="key">mJ/L</span><span class="desc">speed up/slow</span></div>
+        <div class="cmd"><span class="key">#</span><span class="desc">frame selection</span></div>
+        <div class="cmd"><span class="key">#[..]</span><span class="desc">select by #</span></div>
+        <div class="cmd"><span class="key">#jl</span><span class="desc">expand dn/up</span></div>
+        <div class="cmd"><span class="key">#JL</span><span class="desc">contract dn/up</span></div>
+        <div class="cmd"><span class="key">#ik</span><span class="desc">shift up/dn</span></div>
+        <div class="cmd"><span class="key">#a</span><span class="desc">sel same color</span></div>
         <div class="cmd"><span class="key">/</span><span class="desc">compound cmd</span></div>
         <div class="cmd"><span class="key">n</span><span class="desc">repeat last</span></div>
         <div class="cmd"><span class="key">u</span><span class="desc">undo/fork mode</span></div>
+        <div class="cmd"><span class="key">?</span><span class="desc">toggle UI</span></div>
     </div>
 
     <!-- Compound command input overlay -->
     <div id="command-input-overlay">
         <div id="command-input-container">
             <h2>Compound Command</h2>
-            <input type="text" id="command-input" placeholder="Enter commands (e.g., R2R1, ftililir, etc.)">
+            <input type="text" id="command-input" placeholder="Enter commands (e.g., (R,8) or (d(R2R1,23),81))">
             <div id="command-input-help">
                 Press <strong>Enter</strong> to execute • <strong>Escape</strong> to cancel
             </div>
             <div id="command-input-examples">
-                <div class="example">Examples: <code>R2R1</code> <code>ftitititRRR</code> <code>1fp5fpp2fppp</code></div>
-                <div class="example">Combines multiple commands into one sequence</div>
+                <div class="example">Simple: <code>ftililir</code> <code>1fp5fpp2fppp</code></div>
+                <div class="example">Repeat: <code>(R,8)</code> <code>(til,10)</code></div>
+                <div class="example">Nested: <code>(d(R2R1,23),81)</code> = duplicate + rotate combo 81 times</div>
             </div>
+        </div>
+    </div>
+
+    <!-- Frame selection bracket input overlay -->
+    <div id="bracket-input-overlay">
+        <h3>Frame Selection</h3>
+        <input type="text" id="bracket-input" placeholder="e.g., 5 or 1,5,9 or 10:20 or 1:5,10,15:20">
+        <div id="bracket-input-help">
+            <code>[</code> opens • <code>]</code> closes and applies • <code>Escape</code> cancels
+        </div>
+    </div>
+
+    <!-- Color palette - persistent in lower right -->
+    <div id="color-palette-overlay">
+        <div id="color-palette-frame">
+            <div id="color-palette-grid"></div>
         </div>
     </div>
 
@@ -309,6 +467,9 @@
     <!-- Frameworks modules -->
     <script src="src/core.js"></script>
     <script src="src/palette.js"></script>
+    <script src="src/context-color.js"></script>
+    <script src="src/context-camera.js"></script>
+    <script src="src/context-selection.js"></script>
     <script src="src/command-tree.js"></script>
     <script src="src/commands.js"></script>
     <script src="src/renderer-instanced.js"></script>
@@ -317,10 +478,13 @@
     <script>
         // Initialize framework
         const framework = new Framework();
-        const paletteManager = new PaletteManager('checks');
-        const commandTree = new CommandTree();
+        const paletteManager = new PaletteManager('eightyColors');
         const renderer = new FrameworksInstancedRenderer(framework, 'container');
-        const commandExecutor = new CommandExecutor(framework, paletteManager, renderer, commandTree);
+        const colorContext = new ColorContext(framework, paletteManager);
+        const cameraContext = new CameraContext(framework, renderer);
+        const selectionContext = new FrameSelectionContext(framework);
+        const commandTree = new CommandTree();
+        const commandExecutor = new CommandExecutor(framework, paletteManager, renderer, commandTree, colorContext, cameraContext, selectionContext);
 
         // Start rendering
         renderer.start();
@@ -340,6 +504,47 @@
                 frames = 0;
                 lastTime = currentTime;
             }
+        }
+
+        // Build color palette grid
+        function buildColorPaletteGrid() {
+            const grid = document.getElementById('color-palette-grid');
+            grid.innerHTML = '';
+
+            colorContext.colors.forEach((color, index) => {
+                const cell = document.createElement('div');
+                cell.className = 'color-cell';
+                cell.style.backgroundColor = color;  // Color already has '#' prefix
+                cell.dataset.index = index;
+                grid.appendChild(cell);
+            });
+        }
+
+        // Update color palette overlay
+        function updateColorPaletteUI() {
+            const overlay = document.getElementById('color-palette-overlay');
+            const cells = document.querySelectorAll('.color-cell');
+            const selectedColorIndices = colorContext.getSelectedFrameColorIndices();
+
+            // Toggle active class for highlighting
+            if (colorContext.active) {
+                overlay.classList.add('active');
+            } else {
+                overlay.classList.remove('active');
+            }
+
+            // Update cell highlights
+            cells.forEach((cell, index) => {
+                cell.classList.remove('current', 'selected-frame-color');
+
+                if (index === colorContext.currentIndex) {
+                    cell.classList.add('current');
+                }
+
+                if (selectedColorIndices.includes(index)) {
+                    cell.classList.add('selected-frame-color');
+                }
+            });
         }
 
         // Update command history visualization
@@ -389,14 +594,46 @@
             }
         }
 
+        // Last timestamp for delta time calculation
+        let lastTimestamp = performance.now();
+
         // UI update loop
         function updateUI() {
             updateFPS();
 
+            // Calculate delta time for auto-orbit and animation
+            const currentTime = performance.now();
+            const deltaTime = (currentTime - lastTimestamp) / 1000; // Convert to seconds
+            const deltaTimeMs = currentTime - lastTimestamp; // Keep in milliseconds for animation
+            lastTimestamp = currentTime;
+
+            // Update auto-orbit if active
+            if (cameraContext.autoOrbit) {
+                cameraContext.updateAutoOrbit(deltaTime);
+            }
+
+            // Update color animation if active
+            if (commandExecutor.animationActive) {
+                commandExecutor.updateAnimation(deltaTimeMs);
+            }
+
             const viewNames = ['Spatial', 'Front', 'Right', 'Back', 'Left', 'Top', 'Bottom'];
             document.getElementById('view').textContent =
                 `${framework.currentView} (${viewNames[framework.currentView]})`;
-            document.getElementById('mode').textContent = commandTree.inCommandContext ? 'COMMAND CONTEXT' : framework.mode;
+
+            // Display current mode (context or normal)
+            let modeText = framework.mode;
+            if (commandTree.inCommandContext) {
+                modeText = 'COMMAND CONTEXT';
+            } else if (selectionContext.active) {
+                modeText = 'SELECTION CONTEXT';
+            } else if (cameraContext.active) {
+                modeText = 'CAMERA CONTEXT';
+            } else if (colorContext.active) {
+                modeText = 'COLOR CONTEXT';
+            }
+            document.getElementById('mode').textContent = modeText;
+
             document.getElementById('frame-count').textContent = framework.frames.length;
             document.getElementById('selected-count').textContent = framework.getSelectedFrames().length;
             document.getElementById('cursor-pos').textContent =
@@ -407,8 +644,16 @@
             // Update command history visualization
             updateCommandHistoryUI();
 
+            // Update color palette visualization
+            updateColorPaletteUI();
+
             requestAnimationFrame(updateUI);
         }
+
+        // Initialize color palette grid
+        buildColorPaletteGrid();
+
+        // Start UI update loop
         updateUI();
 
         // Compound command overlay state
@@ -464,6 +709,40 @@
             }
         });
 
+        // Bracket input overlay state
+        const bracketOverlay = document.getElementById('bracket-input-overlay');
+        const bracketInput = document.getElementById('bracket-input');
+        let bracketInputActive = false;
+
+        // Open bracket input overlay (called from commands.js)
+        window.openBracketInput = function() {
+            bracketInputActive = true;
+            bracketOverlay.classList.add('active');
+            bracketInput.value = '';
+            bracketInput.focus();
+        };
+
+        // Handle bracket input overlay
+        bracketInput.addEventListener('keydown', (e) => {
+            if (e.key === ']') {
+                e.preventDefault();
+                // Close and apply
+                selectionContext.bracketInput = bracketInput.value.trim();
+                selectionContext.closeBracketInput();
+                bracketOverlay.classList.remove('active');
+                bracketInput.blur();
+                bracketInputActive = false;
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                // Cancel
+                selectionContext.bracketInputActive = false;
+                selectionContext.bracketInput = '';
+                bracketOverlay.classList.remove('active');
+                bracketInput.blur();
+                bracketInputActive = false;
+            }
+        });
+
         // Filter out non-state-changing keys
         function isStateChangingKey(key) {
             const ignoredKeys = [
@@ -477,12 +756,17 @@
 
         // Keyboard input
         document.addEventListener('keydown', (e) => {
-            // If overlay is active, only handle Escape
+            // If compound command overlay is active, only handle Escape
             if (overlayActive) {
                 if (e.key === 'Escape') {
                     e.preventDefault();
                     closeCommandOverlay();
                 }
+                return;
+            }
+
+            // If bracket input overlay is active, let it handle all keys
+            if (bracketInputActive) {
                 return;
             }
 
@@ -508,13 +792,13 @@
             }
 
             // Prevent default for keys we're using
-            if (['f', 'd', 'D', 'x', 't', 'T', 's', 'S', 'r', 'R', 'e', 'E', 'a', 'A', 'z', 'p', 'u',
-                 'i', 'j', 'k', 'l', ' ', 'Escape', '0', '1', '2', '3', '4', '5', '6'].includes(e.key)) {
+            if (['f', 'd', 'D', 'x', 't', 'T', 's', 'S', 'r', 'R', 'e', 'E', 'a', 'A', 'z', 'Z', 'p', 'q', '?', 'v', 'u', 'm', '#', '[',
+                 'i', 'j', 'k', 'l', ' ', 'Escape', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(e.key)) {
                 e.preventDefault();
             }
 
             // Execute command (but don't store single keys as "last command")
-            commandExecutor.executeKey(e.key);
+            commandExecutor.executeKey(e.key, e.shiftKey);
         });
 
         // Export command string function (for later use)

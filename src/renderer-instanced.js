@@ -32,6 +32,11 @@ class FrameworksInstancedRenderer {
         // Rendering settings
         this.backgroundColor = 0x0a0a0a;
 
+        // Camera state
+        this.currentZoom = 50;
+        this.currentFOV = 75;
+        this.autoOrbitMode = false;
+
         this.init();
     }
 
@@ -97,6 +102,16 @@ class FrameworksInstancedRenderer {
 
         // Handle window resize
         window.addEventListener('resize', () => this.onWindowResize());
+
+        // Global scroll handler for zoom (works in all views, including orthographic)
+        this.renderer.domElement.addEventListener('wheel', (e) => {
+            e.preventDefault();
+
+            // Adjust zoom based on scroll direction
+            const zoomDelta = e.deltaY * 0.05;
+            this.currentZoom = Math.max(5, Math.min(500, this.currentZoom + zoomDelta));
+            this.setCameraZoom(this.currentZoom);
+        }, { passive: false });
     }
 
     /**
@@ -160,17 +175,8 @@ class FrameworksInstancedRenderer {
             controls.rotating = false;
         });
 
-        // Scroll for zoom
-        domElement.addEventListener('wheel', (e) => {
-            if (!controls.enabled) return;
-            e.preventDefault();
-
-            controls.spherical.radius += e.deltaY * 0.05;
-            controls.spherical.radius = Math.max(
-                controls.minDistance,
-                Math.min(controls.maxDistance, controls.spherical.radius)
-            );
-        }, { passive: false });
+        // Note: Scroll zoom is now handled by global wheel handler in init()
+        // This allows zoom to work in all views (perspective and orthographic)
 
         return controls;
     }
@@ -633,38 +639,202 @@ class FrameworksInstancedRenderer {
     }
 
     /**
-     * Set active working plane (highlights corresponding face)
-     * 0 = no active plane (all outlines dim)
-     * 1 = front (XY plane, +Z normal)
-     * 2 = right (YZ plane, +X normal)
-     * 3 = back (XY plane, -Z normal)
-     * 4 = left (YZ plane, -X normal)
-     * 5 = top (XZ plane, +Y normal)
-     * 6 = bottom (XZ plane, -Y normal)
-     *
-     * Camera always stays in spatial view with orbit controls
+     * Set UI visibility (cursor, reference cube, HTML panels)
      */
-    setView(viewNumber) {
-        // Always use perspective camera
-        this.camera = this.perspectiveCamera;
-        this.controls.enabled = true;
+    setUIVisible(visible) {
+        // Show/hide cursor
+        const cursor = this.scene.getObjectByName('cursor');
+        if (cursor) {
+            cursor.visible = visible;
+        }
 
+        // Show/hide reference cube
+        if (this.referenceCube) {
+            this.referenceCube.visible = visible;
+        }
+
+        // Show/hide HTML UI panels
+        const panels = ['#ui', '#help', '#command-history', '#perf', '#color-palette-overlay'];
+        panels.forEach(selector => {
+            const element = document.querySelector(selector);
+            if (element) {
+                element.style.display = visible ? '' : 'none';
+            }
+        });
+
+        console.log('UI elements', visible ? 'shown' : 'hidden');
+    }
+
+    /**
+     * Set camera view with orthographic/perspective toggle
+     * @param {number} viewNumber - 0=spatial, 1-6=cardinal, 7=isometric, 9=auto-orbit
+     * @param {boolean} orthographic - Use orthographic projection
+     * @param {number} zoom - Distance from origin
+     * @param {number} fov - Field of view (for perspective)
+     */
+    setCameraView(viewNumber, orthographic = false, zoom = 50, fov = 75) {
+        this.currentZoom = zoom;
+        this.currentFOV = fov;
+        this.autoOrbitMode = (viewNumber === 9);
+
+        const viewNames = ['Spatial', 'Front', 'Right', 'Back', 'Left', 'Top', 'Bottom', 'Isometric', '', 'Auto-Orbit'];
+
+        // Choose camera type based on orthographic flag
+        if (orthographic) {
+            this.camera = this.orthographicCamera;
+            this.controls.enabled = false;
+        } else {
+            this.camera = this.perspectiveCamera;
+            this.perspectiveCamera.fov = fov;
+            this.perspectiveCamera.updateProjectionMatrix();
+            this.controls.enabled = (viewNumber === 0); // Only enable controls for spatial view
+        }
+
+        // Set camera position based on view
+        switch (viewNumber) {
+            case 0: // Spatial (free orbit)
+                // Keep current orbit position, just enable controls
+                this.controls.enabled = !orthographic;
+                this.dimAllFaceOutlines();
+                break;
+
+            case 1: // Front (looking from +Z)
+                this.positionCamera(0, 0, zoom, 0, 1, 0);
+                this.highlightFace(1);
+                break;
+
+            case 2: // Right (looking from +X)
+                this.positionCamera(zoom, 0, 0, 0, 1, 0);
+                this.highlightFace(2);
+                break;
+
+            case 3: // Back (looking from -Z)
+                this.positionCamera(0, 0, -zoom, 0, 1, 0);
+                this.highlightFace(3);
+                break;
+
+            case 4: // Left (looking from -X)
+                this.positionCamera(-zoom, 0, 0, 0, 1, 0);
+                this.highlightFace(4);
+                break;
+
+            case 5: // Top (looking from +Y)
+                this.positionCamera(0, zoom, 0, 0, 0, -1);
+                this.highlightFace(5);
+                break;
+
+            case 6: // Bottom (looking from -Y)
+                this.positionCamera(0, -zoom, 0, 0, 0, 1);
+                this.highlightFace(6);
+                break;
+
+            case 7: // Isometric (45° from XZ plane, 45° from XY plane)
+                const isoDistance = zoom * Math.sqrt(3);
+                this.positionCamera(isoDistance / Math.sqrt(3), isoDistance / Math.sqrt(3), isoDistance / Math.sqrt(3), 0, 1, 0);
+                this.dimAllFaceOutlines();
+                break;
+
+            case 9: // Auto-orbit will be handled in animation loop
+                this.dimAllFaceOutlines();
+                break;
+        }
+
+        console.log('View:', viewNames[viewNumber], orthographic ? '(orthographic)' : '(perspective)');
+    }
+
+    /**
+     * Position camera at specific location
+     */
+    positionCamera(x, y, z, upX, upY, upZ) {
+        this.camera.position.set(x, y, z);
+        this.camera.up.set(upX, upY, upZ);
+        this.camera.lookAt(0, 0, 0);
+    }
+
+    /**
+     * Highlight a specific face outline
+     */
+    highlightFace(faceNumber) {
         if (!this.referenceCube) return;
-
-        // Reset all outlines to dim
         const outlines = this.referenceCube.userData.faceOutlines;
+
+        // Reset all to dim
         for (let key in outlines) {
             outlines[key].material.opacity = 0.3;
             outlines[key].material.transparent = true;
         }
 
-        // Highlight active face
-        if (viewNumber >= 1 && viewNumber <= 6) {
-            outlines[viewNumber].material.opacity = 1.0;
+        // Highlight specified face
+        if (outlines[faceNumber]) {
+            outlines[faceNumber].material.opacity = 1.0;
         }
+    }
 
-        const viewNames = ['Spatial', 'Front', 'Right', 'Back', 'Left', 'Top', 'Bottom'];
-        console.log('Active plane:', viewNames[viewNumber]);
+    /**
+     * Dim all face outlines
+     */
+    dimAllFaceOutlines() {
+        if (!this.referenceCube) return;
+        const outlines = this.referenceCube.userData.faceOutlines;
+        for (let key in outlines) {
+            outlines[key].material.opacity = 0.3;
+            outlines[key].material.transparent = true;
+        }
+    }
+
+    /**
+     * Set camera zoom (distance from origin for perspective, frustum size for orthographic)
+     */
+    setCameraZoom(zoom) {
+        this.currentZoom = zoom;
+
+        if (this.camera === this.perspectiveCamera) {
+            // Perspective: update camera distance while preserving direction
+            const direction = new THREE.Vector3();
+            direction.copy(this.camera.position).normalize();
+            this.camera.position.copy(direction.multiplyScalar(zoom));
+
+            // Update orbit controls spherical radius
+            if (this.controls.spherical) {
+                this.controls.spherical.radius = zoom;
+            }
+        } else if (this.camera === this.orthographicCamera) {
+            // Orthographic: adjust frustum size (smaller frustum = more zoomed in)
+            const aspect = window.innerWidth / window.innerHeight;
+            const frustumSize = zoom * 0.2; // Scale factor for orthographic zoom
+
+            this.orthographicCamera.left = frustumSize * aspect / -2;
+            this.orthographicCamera.right = frustumSize * aspect / 2;
+            this.orthographicCamera.top = frustumSize / 2;
+            this.orthographicCamera.bottom = frustumSize / -2;
+            this.orthographicCamera.updateProjectionMatrix();
+        }
+    }
+
+    /**
+     * Set camera FOV (field of view)
+     */
+    setCameraFOV(fov) {
+        this.currentFOV = fov;
+        if (this.camera === this.perspectiveCamera) {
+            this.perspectiveCamera.fov = fov;
+            this.perspectiveCamera.updateProjectionMatrix();
+        }
+    }
+
+    /**
+     * Set auto-orbit angle
+     */
+    setAutoOrbitAngle(angle, radius) {
+        if (!this.autoOrbitMode) return;
+
+        // Position camera in a circle around Y axis
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        const y = radius * 0.5; // Slight elevation
+
+        this.camera.position.set(x, y, z);
+        this.camera.lookAt(0, 0, 0);
     }
 }
 
