@@ -35,16 +35,16 @@ class ColorContext {
 
             if (colorIndex >= 0) {
                 this.currentIndex = colorIndex;
-                console.log('Found frame color at index', colorIndex, targetColor);
+                // console.log('Found frame color at index', colorIndex, targetColor);
             } else {
-                console.log('Frame color not found in palette:', targetColor);
+                // console.log('Frame color not found in palette:', targetColor);
             }
         }
 
         // Save starting position for calculating shift
         this.startingIndex = this.currentIndex;
 
-        console.log('Entered color context at index', this.currentIndex);
+        // console.log('Entered color context at index', this.currentIndex);
     }
 
     /**
@@ -52,7 +52,7 @@ class ColorContext {
      */
     exit() {
         this.active = false;
-        console.log('Exited color context');
+        // console.log('Exited color context');
     }
 
     /**
@@ -87,7 +87,7 @@ class ColorContext {
                 return false;
         }
 
-        console.log('Color navigation:', key, 'from', oldIndex, 'to', this.currentIndex);
+        // console.log('Color navigation:', key, 'from', oldIndex, 'to', this.currentIndex);
         return true;
     }
 
@@ -135,11 +135,11 @@ class ColorContext {
                 }
             });
 
-            console.log('Shifted', selected.length, 'frames by', shift, 'color positions');
+            // console.log('Shifted', selected.length, 'frames by', shift, 'color positions');
         } else {
             // Update palette index for next frame creation
             this.palette.currentIndex = this.currentIndex;
-            console.log('Set palette index to', this.currentIndex);
+            // console.log('Set palette index to', this.currentIndex);
         }
     }
 

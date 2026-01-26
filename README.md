@@ -37,9 +37,16 @@ frameworks-v3/
 │   ├── core.js               # Frame, Cursor, Framework classes
 │   ├── commands.js           # Command parser and executor
 │   ├── renderer-instanced.js # GPU-accelerated renderer with GLSL shaders
-│   └── palette.js            # Color palette manager
+│   ├── palette.js            # Color palette manager
+│   ├── command-tree.js       # 2D command history navigation
+│   ├── context-*.js          # Context system modules
+│   └── ...
+├── ROADMAP.md                # Development priorities and next steps
 ├── COORDINATE_SYSTEMS.md     # Detailed coordinate system documentation
+├── CONTEXT_SYSTEM.md         # Context navigation architecture
+├── COMMAND_INTERFACE.md      # Command editor and compaction system
 ├── CHANGELOG.md              # Version history and bug fixes
+├── CLAUDE.md                 # Design philosophy and project vision
 └── README.md                 # This file
 ```
 
@@ -196,8 +203,10 @@ The custom GLSL vertex shader (`src/renderer-instanced.js`) handles:
 
 ## Documentation
 
+- **ROADMAP.md** - Development priorities and next steps for contributors
 - **COORDINATE_SYSTEMS.md** - Detailed explanation of 6-view system and coordinate mappings
 - **CONTEXT_SYSTEM.md** - Universal context navigation architecture (command history, color palettes, etc.)
+- **COMMAND_INTERFACE.md** - Command editor system with automatic compaction and pattern detection
 - **CHANGELOG.md** - Version history and critical bug fixes
 - **CLAUDE.md** - Design philosophy and project vision
 

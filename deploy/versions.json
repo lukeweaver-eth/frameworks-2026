@@ -1,0 +1,91 @@
+{
+  "globalVersion": "1.0.0",
+  "lastDeployment": null,
+  "deploymentCount": 0,
+
+  "components": {
+    "core": {
+      "version": "0.0.0",
+      "hash": null,
+      "filename": null,
+      "pointer": null,
+      "lastModified": null,
+      "size": 0
+    },
+    "palette": {
+      "version": "0.0.0",
+      "hash": null,
+      "filename": null,
+      "pointer": null,
+      "lastModified": null,
+      "size": 0
+    },
+    "camera": {
+      "version": "0.0.0",
+      "hash": null,
+      "filename": null,
+      "pointer": null,
+      "lastModified": null,
+      "size": 0
+    },
+    "color": {
+      "version": "0.0.0",
+      "hash": null,
+      "filename": null,
+      "pointer": null,
+      "lastModified": null,
+      "size": 0
+    },
+    "selection": {
+      "version": "0.0.0",
+      "hash": null,
+      "filename": null,
+      "pointer": null,
+      "lastModified": null,
+      "size": 0
+    },
+    "commandTree": {
+      "version": "0.0.0",
+      "hash": null,
+      "filename": null,
+      "pointer": null,
+      "lastModified": null,
+      "size": 0
+    },
+    "commands": {
+      "version": "0.0.0",
+      "hash": null,
+      "filename": null,
+      "pointer": null,
+      "lastModified": null,
+      "size": 0
+    },
+    "renderer": {
+      "version": "0.0.0",
+      "hash": null,
+      "filename": null,
+      "pointer": null,
+      "lastModified": null,
+      "size": 0
+    },
+    "index": {
+      "version": "0.0.0",
+      "hash": null,
+      "filename": null,
+      "pointer": null,
+      "lastModified": null,
+      "size": 0
+    }
+  },
+
+  "dependencies": {
+    "threejs": {
+      "version": "0.160.0",
+      "filename": "three-v0.160.0.min.js",
+      "pointer": null,
+      "note": "Upload Three.js to ETHFS using: deploy/upload-threejs.js"
+    }
+  },
+
+  "deploymentHistory": []
+}

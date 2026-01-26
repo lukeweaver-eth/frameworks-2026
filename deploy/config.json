@@ -1,0 +1,64 @@
+{
+  "networks": {
+    "mainnet": {
+      "rpcUrl": "https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY",
+      "ethfsFileStore": "0xFe1411d6864592549AdE050215482e4385dFa0FB",
+      "scriptyBuilder": "0xD7587F110E08F4D120A231bA97d3B577A81Df022",
+      "chainId": 1
+    },
+    "sepolia": {
+      "rpcUrl": "https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY",
+      "ethfsFileStore": "0xFe1411d6864592549AdE050215482e4385dFa0FB",
+      "scriptyBuilder": "0xD7587F110E08F4D120A231bA97d3B577A81Df022",
+      "chainId": 11155111
+    },
+    "base": {
+      "rpcUrl": "https://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY",
+      "ethfsFileStore": "0xFe1411d6864592549AdE050215482e4385dFa0FB",
+      "scriptyBuilder": "0xD7587F110E08F4D120A231bA97d3B577A81Df022",
+      "chainId": 8453
+    }
+  },
+
+  "components": {
+    "core": "src/core.js",
+    "palette": "src/palette.js",
+    "camera": "src/context-camera.js",
+    "color": "src/context-color.js",
+    "selection": "src/context-selection.js",
+    "commandTree": "src/command-tree.js",
+    "commands": "src/commands.js",
+    "renderer": "src/renderer-instanced.js"
+  },
+
+  "loadOrder": [
+    "core",
+    "palette",
+    "camera",
+    "color",
+    "selection",
+    "commandTree",
+    "commands",
+    "renderer"
+  ],
+
+  "dependencies": {
+    "threejs": {
+      "version": "0.160.0",
+      "ethfsPath": "ethfs://three.min.js",
+      "note": "Update this if Three.js is deployed to ETHFS"
+    }
+  },
+
+  "versionBumpRules": {
+    "default": "patch",
+    "breaking": "major",
+    "feature": "minor"
+  },
+
+  "ethfsUploadConfig": {
+    "gasLimit": 500000,
+    "maxRetries": 3,
+    "retryDelay": 5000
+  }
+}

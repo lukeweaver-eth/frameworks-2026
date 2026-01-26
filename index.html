@@ -135,7 +135,25 @@
 
     <div id="command-history">
         <h3>Command History</h3>
-        <div id="command-string"></div>
+        <div id="command-string-raw"></div>
+        <div style="margin-top: 10px;">
+            <strong style="color: #4ECDC4;">Condensed:</strong>
+            <div id="command-string-condensed" style="color: #FFA07A; margin-top: 5px;"></div>
+        </div>
+        <button id="copy-btn" style="margin-top: 10px; padding: 5px 10px; background: #4ECDC4; border: none; border-radius: 3px; cursor: pointer; pointer-events: auto; font-family: 'Courier New', monospace; color: #000;">
+            Copy Condensed
+        </button>
+    </div>
+
+    <div id="command-input" style="position: fixed; bottom: 20px; right: 20px; background: rgba(0, 0, 0, 0.7); padding: 15px; border-radius: 5px; max-width: 400px;">
+        <h3 style="margin-bottom: 10px; color: #4ECDC4; font-size: 12px;">Paste Commands</h3>
+        <textarea id="paste-input" placeholder="Paste condensed command string here..." style="width: 100%; min-height: 60px; background: #2a2a2a; border: 1px solid #4ECDC4; color: #fff; font-family: 'Courier New', monospace; font-size: 11px; padding: 5px; border-radius: 3px; resize: vertical;"></textarea>
+        <button id="paste-btn" style="margin-top: 10px; padding: 5px 10px; background: #4ECDC4; border: none; border-radius: 3px; cursor: pointer; font-family: 'Courier New', monospace; color: #000;">
+            Execute
+        </button>
+        <button id="clear-btn" style="margin-top: 10px; margin-left: 5px; padding: 5px 10px; background: #FF6B6B; border: none; border-radius: 3px; cursor: pointer; font-family: 'Courier New', monospace; color: #000;">
+            Clear Framework
+        </button>
     </div>
 
     <div id="help">
@@ -181,8 +199,16 @@
             document.getElementById('selected-count').textContent = framework.getSelectedFrames().length;
             document.getElementById('cursor-pos').textContent =
                 `(${framework.cursor.x.toFixed(1)}, ${framework.cursor.y.toFixed(1)}, ${framework.cursor.z.toFixed(1)})`;
-            document.getElementById('command-string').textContent =
-                framework.commandHistory.join(' ') || '(no commands yet)';
+
+            // Update raw command string
+            const rawCommands = framework.commandHistory.join('');
+            document.getElementById('command-string-raw').textContent =
+                rawCommands || '(no commands yet)';
+
+            // Update condensed command string
+            const condensedCommands = commandExecutor.getCondensedCommands();
+            document.getElementById('command-string-condensed').textContent =
+                condensedCommands || '(no commands yet)';
 
             requestAnimationFrame(updateUI);
         }
@@ -202,11 +228,57 @@
             commandExecutor.executeKey(e.key);
         });
 
+        // Copy button functionality
+        document.getElementById('copy-btn').addEventListener('click', () => {
+            const condensedCommands = commandExecutor.getCondensedCommands();
+            if (condensedCommands) {
+                navigator.clipboard.writeText(condensedCommands).then(() => {
+                    const btn = document.getElementById('copy-btn');
+                    const originalText = btn.textContent;
+                    btn.textContent = 'Copied!';
+                    btn.style.background = '#5FFF5F';
+                    setTimeout(() => {
+                        btn.textContent = originalText;
+                        btn.style.background = '#4ECDC4';
+                    }, 1000);
+                    console.log('Copied to clipboard:', condensedCommands);
+                }).catch(err => {
+                    console.error('Failed to copy:', err);
+                    alert('Failed to copy to clipboard');
+                });
+            }
+        });
+
+        // Paste button functionality
+        document.getElementById('paste-btn').addEventListener('click', () => {
+            const cmdString = document.getElementById('paste-input').value.trim();
+            if (cmdString) {
+                console.log('Executing pasted commands:', cmdString);
+                commandExecutor.executeCommandString(cmdString);
+                document.getElementById('paste-input').value = '';
+            }
+        });
+
+        // Clear button functionality
+        document.getElementById('clear-btn').addEventListener('click', () => {
+            if (confirm('Clear all frames and command history?')) {
+                framework.clear();
+                console.log('Framework cleared');
+            }
+        });
+
         // Export command string function (for later use)
         window.exportCommandString = function() {
             const cmdString = framework.commandHistory.join('');
             console.log('Command string:', cmdString);
             return cmdString;
+        };
+
+        // Export condensed command string
+        window.exportCondensedCommands = function() {
+            const condensed = commandExecutor.getCondensedCommands();
+            console.log('Condensed commands:', condensed);
+            return condensed;
         };
 
         // Auto-execute command string (for replay)
@@ -217,7 +289,7 @@
 
         console.log('Frameworks V3 initialized');
         console.log('Type "f" to create a frame, "t ijkl" to move');
-        console.log('Use exportCommandString() to get command history');
+        console.log('Use exportCondensedCommands() to get condensed command string');
     </script>
 </body>
 </html>

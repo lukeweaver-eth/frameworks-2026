@@ -15,7 +15,7 @@ class FrameSelectionContext {
      */
     enter() {
         this.active = true;
-        console.log('Entered frame selection context');
+        // console.log('Entered frame selection context');
     }
 
     /**
@@ -25,7 +25,7 @@ class FrameSelectionContext {
         this.active = false;
         this.bracketInputActive = false;
         this.bracketInput = '';
-        console.log('Exited frame selection context');
+        // console.log('Exited frame selection context');
     }
 
     /**
@@ -34,7 +34,7 @@ class FrameSelectionContext {
     openBracketInput() {
         this.bracketInputActive = true;
         this.bracketInput = '';
-        console.log('Bracket input mode opened');
+        // console.log('Bracket input mode opened');
     }
 
     /**
@@ -46,7 +46,7 @@ class FrameSelectionContext {
         }
         this.bracketInputActive = false;
         this.bracketInput = '';
-        console.log('Bracket input mode closed');
+        // console.log('Bracket input mode closed');
     }
 
     /**
@@ -91,7 +91,7 @@ class FrameSelectionContext {
             }
         });
 
-        console.log('Selected frames:', Array.from(frameIndices).sort((a, b) => a - b).join(', '));
+        // console.log('Selected frames:', Array.from(frameIndices).sort((a, b) => a - b).join(', '));
     }
 
     /**
@@ -137,7 +137,7 @@ class FrameSelectionContext {
             const nextFrame = fw.frames.find(f => f.count === targetCount);
             if (nextFrame) {
                 nextFrame.selected = true;
-                console.log('Expanded down to frame', nextFrame.count);
+                // console.log('Expanded down to frame', nextFrame.count);
             }
         }
     }
@@ -168,7 +168,7 @@ class FrameSelectionContext {
             const nextFrame = fw.frames.find(f => f.count === targetCount);
             if (nextFrame) {
                 nextFrame.selected = true;
-                console.log('Expanded up to frame', nextFrame.count);
+                // console.log('Expanded up to frame', nextFrame.count);
             }
         }
     }
@@ -184,7 +184,7 @@ class FrameSelectionContext {
             const minFrame = fw.frames.find(f => f.count === bounds.min && f.selected);
             if (minFrame) {
                 minFrame.selected = false;
-                console.log('Contracted lower bound, removed frame', minFrame.count);
+                // console.log('Contracted lower bound, removed frame', minFrame.count);
             }
         }
     }
@@ -200,7 +200,7 @@ class FrameSelectionContext {
             const maxFrame = fw.frames.find(f => f.count === bounds.max && f.selected);
             if (maxFrame) {
                 maxFrame.selected = false;
-                console.log('Contracted upper bound, removed frame', maxFrame.count);
+                // console.log('Contracted upper bound, removed frame', maxFrame.count);
             }
         }
     }
@@ -231,7 +231,7 @@ class FrameSelectionContext {
             if (frame) frame.selected = true;
         });
 
-        console.log('Shifted selection down (with wraparound)');
+        // console.log('Shifted selection down (with wraparound)');
     }
 
     /**
@@ -260,7 +260,7 @@ class FrameSelectionContext {
             if (frame) frame.selected = true;
         });
 
-        console.log('Shifted selection up (with wraparound)');
+        // console.log('Shifted selection up (with wraparound)');
     }
 
     /**
@@ -279,7 +279,7 @@ class FrameSelectionContext {
             }
         });
 
-        console.log('Selected all frames with color', targetColor);
+        // console.log('Selected all frames with color', targetColor);
     }
 }
 

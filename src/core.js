@@ -3,9 +3,9 @@
 
 /**
  * Frame class - represents a planar object in 3D space
- * Coordinates: 6D (x, y, z, î, ĵ, k̂)
+ * Coordinates: 6D position + 9D orientation (x, y, z, right, up, normal)
  * - xyz: global position (center point)
- * - î ĵ k̂: normal direction (unit vector defining which way frame faces)
+ * - right/up/normal: orthonormal basis vectors defining frame's 3D orientation
  */
 class Frame {
     constructor(x, y, z, ihat, jhat, khat, size = 1, color = '#ffffff') {
@@ -14,14 +14,24 @@ class Frame {
         this.y = y;
         this.z = z;
 
-        // Normal direction (unit vector)
+        // Orientation: Orthonormal basis (3 perpendicular unit vectors)
+        // Right vector (X-axis of frame, tangent)
+        this.rightX = 1;
+        this.rightY = 0;
+        this.rightZ = 0;
+
+        // Up vector (Y-axis of frame, bitangent)
+        this.upX = 0;
+        this.upY = 1;
+        this.upZ = 0;
+
+        // Normal vector (Z-axis of frame)
         this.ihat = ihat;
         this.jhat = jhat;
         this.khat = khat;
 
-        // Roll angle (rotation around normal, in radians)
-        // For XY plane, this is rotation in the plane itself
-        this.roll = 0;
+        // Initialize right/up vectors from normal using canonical basis
+        this.reconstructBasisFromNormal();
 
         // Properties
         this.size = size;
@@ -42,37 +52,107 @@ class Frame {
     }
 
     /**
+     * Reconstruct right and up vectors from normal vector
+     * Uses same algorithm as shader for consistency
+     */
+    reconstructBasisFromNormal() {
+        // Normalize normal (should already be normalized, but just in case)
+        const length = Math.sqrt(this.ihat * this.ihat + this.jhat * this.jhat + this.khat * this.khat);
+        if (length > 0.0001) {
+            this.ihat /= length;
+            this.jhat /= length;
+            this.khat /= length;
+        }
+
+        // Default frame is in XY plane with normal pointing in +Z
+        // If normal is already (0, 0, 1), use identity basis
+        const defaultThreshold = 0.001;
+        if (Math.abs(this.ihat) < defaultThreshold &&
+            Math.abs(this.jhat) < defaultThreshold &&
+            Math.abs(this.khat - 1) < defaultThreshold) {
+            this.rightX = 1;
+            this.rightY = 0;
+            this.rightZ = 0;
+            this.upX = 0;
+            this.upY = 1;
+            this.upZ = 0;
+            return;
+        }
+
+        // Use world +Y as reference "up" direction for consistency
+        const worldUpX = 0, worldUpY = 1, worldUpZ = 0;
+
+        // If normal is parallel to worldUp, use worldRight as reference instead
+        const dotWithWorldUp = Math.abs(this.ihat * worldUpX + this.jhat * worldUpY + this.khat * worldUpZ);
+        let refX, refY, refZ;
+
+        if (dotWithWorldUp > 0.999) {
+            // Use +X when normal is ±Y
+            refX = 1;
+            refY = 0;
+            refZ = 0;
+        } else {
+            refX = worldUpX;
+            refY = worldUpY;
+            refZ = worldUpZ;
+        }
+
+        // Right (tangent) = cross(reference, normal)
+        // This gives us a consistent "right" direction
+        this.rightX = refY * this.khat - refZ * this.jhat;
+        this.rightY = refZ * this.ihat - refX * this.khat;
+        this.rightZ = refX * this.jhat - refY * this.ihat;
+
+        // Normalize right vector
+        const rightLen = Math.sqrt(this.rightX * this.rightX + this.rightY * this.rightY + this.rightZ * this.rightZ);
+        if (rightLen > 0.0001) {
+            this.rightX /= rightLen;
+            this.rightY /= rightLen;
+            this.rightZ /= rightLen;
+        }
+
+        // Up (bitangent) = cross(normal, right)
+        // This is the frame's local "up" direction
+        this.upX = this.jhat * this.rightZ - this.khat * this.rightY;
+        this.upY = this.khat * this.rightX - this.ihat * this.rightZ;
+        this.upZ = this.ihat * this.rightY - this.jhat * this.rightX;
+
+        // Normalize up vector
+        const upLen = Math.sqrt(this.upX * this.upX + this.upY * this.upY + this.upZ * this.upZ);
+        if (upLen > 0.0001) {
+            this.upX /= upLen;
+            this.upY /= upLen;
+            this.upZ /= upLen;
+        }
+    }
+
+    /**
      * Get the 4 corner points of this frame
      * Returns array of [x, y, z] coordinates
      */
     getCorners() {
-        // Calculate local right and down vectors with roll angle
-        // For a frame in XY plane:
-        // - Start with right = (1, 0, 0) and up = (0, -1, 0)
-        // - Rotate both by roll angle
+        // Use stored right and up vectors (already in 3D)
         const halfSize = this.size / 2;
-        const cos = Math.cos(this.roll);
-        const sin = Math.sin(this.roll);
 
-        // Right vector (horizontal): (1, 0) rotated by roll
-        const rightX = cos * halfSize;
-        const rightY = sin * halfSize;
+        // Scale right and up vectors by halfSize
+        const rightX = this.rightX * halfSize;
+        const rightY = this.rightY * halfSize;
+        const rightZ = this.rightZ * halfSize;
 
-        // Up vector (vertical): (0, -1) rotated by roll
-        // Perpendicular to right, rotated 90° CCW from right
-        const upX = -sin * halfSize;
-        const upY = cos * halfSize;
+        const upX = this.upX * halfSize;
+        const upY = this.upY * halfSize;
+        const upZ = this.upZ * halfSize;
 
         // Four corners: top-left, top-right, bottom-left, bottom-right
         return [
             // top-left = center - right + up
-            [this.x - rightX + upX, this.y - rightY + upY, this.z],
+            [this.x - rightX + upX, this.y - rightY + upY, this.z - rightZ + upZ],
             // top-right = center + right + up
-            [this.x + rightX + upX, this.y + rightY + upY, this.z],
+            [this.x + rightX + upX, this.y + rightY + upY, this.z + rightZ + upZ],
             // bottom-left = center - right - up
-            [this.x - rightX - upX, this.y - rightY - upY, this.z],
+            [this.x - rightX - upX, this.y - rightY - upY, this.z - rightZ - upZ],
             // bottom-right = center + right - up
-            [this.x + rightX - upX, this.y + rightY - upY, this.z]
+            [this.x + rightX - upX, this.y + rightY - upY, this.z + rightZ - upZ]
         ];
     }
 
@@ -87,6 +167,7 @@ class Frame {
 
     /**
      * Rotate frame around a point (typically cursor) along specified axis
+     * Rotates both position and full orientation basis (right, up, normal vectors)
      * @param {number} centerX - X coordinate of rotation center
      * @param {number} centerY - Y coordinate of rotation center
      * @param {number} centerZ - Z coordinate of rotation center
@@ -125,50 +206,97 @@ class Frame {
                 break;
         }
 
-        // Translate back
+        // Update position
         this.x = centerX + newDx;
         this.y = centerY + newDy;
         this.z = centerZ + newDz;
 
-        // ALWAYS rotate the normal vector according to the rotation axis
-        // The normal is a direction in 3D space and rotates with the frame
-        const oldIhat = this.ihat;
-        const oldJhat = this.jhat;
-        const oldKhat = this.khat;
+        // Rotate all three basis vectors using same rotation matrix
+        // Store old values
+        const oldRightX = this.rightX, oldRightY = this.rightY, oldRightZ = this.rightZ;
+        const oldUpX = this.upX, oldUpY = this.upY, oldUpZ = this.upZ;
+        const oldNormalX = this.ihat, oldNormalY = this.jhat, oldNormalZ = this.khat;
 
+        // Apply rotation to right vector
         switch (axis) {
-            case 'x': // Rotating around X axis
-                this.ihat = oldIhat;
-                this.jhat = oldJhat * cos - oldKhat * sin;
-                this.khat = oldJhat * sin + oldKhat * cos;
+            case 'x':
+                this.rightX = oldRightX;
+                this.rightY = oldRightY * cos - oldRightZ * sin;
+                this.rightZ = oldRightY * sin + oldRightZ * cos;
                 break;
-
-            case 'y': // Rotating around Y axis
-                this.ihat = oldIhat * cos + oldKhat * sin;
-                this.jhat = oldJhat;
-                this.khat = -oldIhat * sin + oldKhat * cos;
+            case 'y':
+                this.rightX = oldRightX * cos + oldRightZ * sin;
+                this.rightY = oldRightY;
+                this.rightZ = -oldRightX * sin + oldRightZ * cos;
                 break;
-
-            case 'z': // Rotating around Z axis
-                this.ihat = oldIhat * cos - oldJhat * sin;
-                this.jhat = oldIhat * sin + oldJhat * cos;
-                this.khat = oldKhat;
+            case 'z':
+                this.rightX = oldRightX * cos - oldRightY * sin;
+                this.rightY = oldRightX * sin + oldRightY * cos;
+                this.rightZ = oldRightZ;
                 break;
         }
 
-        // Additionally, update roll if rotating in the frame's own plane
-        // This happens when the rotation axis is parallel to the frame's normal
-        const rotatingInOwnPlane =
-            (axis === 'z' && Math.abs(oldKhat) > 0.9) ||
-            (axis === 'x' && Math.abs(oldIhat) > 0.9) ||
-            (axis === 'y' && Math.abs(oldJhat) > 0.9);
-
-        if (rotatingInOwnPlane) {
-            // Frame is spinning in its own plane - update roll
-            this.roll += angle;
+        // Apply rotation to up vector
+        switch (axis) {
+            case 'x':
+                this.upX = oldUpX;
+                this.upY = oldUpY * cos - oldUpZ * sin;
+                this.upZ = oldUpY * sin + oldUpZ * cos;
+                break;
+            case 'y':
+                this.upX = oldUpX * cos + oldUpZ * sin;
+                this.upY = oldUpY;
+                this.upZ = -oldUpX * sin + oldUpZ * cos;
+                break;
+            case 'z':
+                this.upX = oldUpX * cos - oldUpY * sin;
+                this.upY = oldUpX * sin + oldUpY * cos;
+                this.upZ = oldUpZ;
+                break;
         }
 
-        console.log(`Rotated around ${axis}: normal (${oldIhat.toFixed(2)}, ${oldJhat.toFixed(2)}, ${oldKhat.toFixed(2)}) → (${this.ihat.toFixed(2)}, ${this.jhat.toFixed(2)}, ${this.khat.toFixed(2)}), in-plane=${rotatingInOwnPlane}, roll=${this.roll.toFixed(2)}`);
+        // Apply rotation to normal vector
+        switch (axis) {
+            case 'x':
+                this.ihat = oldNormalX;
+                this.jhat = oldNormalY * cos - oldNormalZ * sin;
+                this.khat = oldNormalY * sin + oldNormalZ * cos;
+                break;
+            case 'y':
+                this.ihat = oldNormalX * cos + oldNormalZ * sin;
+                this.jhat = oldNormalY;
+                this.khat = -oldNormalX * sin + oldNormalZ * cos;
+                break;
+            case 'z':
+                this.ihat = oldNormalX * cos - oldNormalY * sin;
+                this.jhat = oldNormalX * sin + oldNormalY * cos;
+                this.khat = oldNormalZ;
+                break;
+        }
+
+        // Normalize all three vectors to prevent floating-point drift
+        const rightLen = Math.sqrt(this.rightX * this.rightX + this.rightY * this.rightY + this.rightZ * this.rightZ);
+        if (rightLen > 0.0001) {
+            this.rightX /= rightLen;
+            this.rightY /= rightLen;
+            this.rightZ /= rightLen;
+        }
+
+        const upLen = Math.sqrt(this.upX * this.upX + this.upY * this.upY + this.upZ * this.upZ);
+        if (upLen > 0.0001) {
+            this.upX /= upLen;
+            this.upY /= upLen;
+            this.upZ /= upLen;
+        }
+
+        const normalLen = Math.sqrt(this.ihat * this.ihat + this.jhat * this.jhat + this.khat * this.khat);
+        if (normalLen > 0.0001) {
+            this.ihat /= normalLen;
+            this.jhat /= normalLen;
+            this.khat /= normalLen;
+        }
+
+        // console.log(`Rotated around ${axis} by ${(angle * 180 / Math.PI).toFixed(1)}°`);
     }
 
     /**
@@ -196,7 +324,16 @@ class Frame {
             this.ihat, this.jhat, this.khat,
             this.size, this.color
         );
-        newFrame.roll = this.roll;  // Copy rotation
+
+        // Copy full orientation basis
+        newFrame.rightX = this.rightX;
+        newFrame.rightY = this.rightY;
+        newFrame.rightZ = this.rightZ;
+        newFrame.upX = this.upX;
+        newFrame.upY = this.upY;
+        newFrame.upZ = this.upZ;
+        // Normal is already copied via constructor
+
         newFrame.called = this.called;
         newFrame.contents = this.contents;
         newFrame.selected = true;
@@ -249,7 +386,7 @@ class Framework {
 
     /**
      * Clear all frames and reset state
-     * Used when reconstructing from command history
+     * Used when reconstructing from command history or starting fresh
      */
     clear() {
         this.frames = [];
@@ -257,7 +394,9 @@ class Framework {
         this.frameCounter = 0;
         this.mode = 'normal';
         this.currentView = 1;
-        console.log('Framework cleared');
+        this.commandHistory = [];
+        this.actionHistory = [];
+        // console.log('Framework cleared');
     }
 
     /**

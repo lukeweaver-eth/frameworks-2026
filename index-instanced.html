@@ -54,59 +54,75 @@
             color: #fff;
         }
 
-        #command-history {
+        /* Command Editor - left sidebar */
+        #command-editor {
             position: fixed;
-            bottom: 20px;
             left: 20px;
-            background: rgba(0, 0, 0, 0.85);
-            padding: 15px;
+            top: 180px;
+            bottom: 20px;
+            width: 320px;
+            background: rgba(0, 0, 0, 0.9);
+            border: 1px solid #4ECDC4;
             border-radius: 5px;
-            font-size: 12px;
-            max-width: 600px;
-            max-height: 300px;
-            overflow-y: auto;
-            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            pointer-events: auto;
         }
 
-        #command-history.command-context {
-            border: 2px solid #4ECDC4;
-        }
-
-        #command-history h3 {
-            margin-bottom: 10px;
+        #command-editor h3 {
             color: #4ECDC4;
+            padding: 15px;
+            margin: 0;
+            border-bottom: 1px solid rgba(78, 205, 196, 0.3);
+            font-size: 14px;
         }
 
-        #command-string {
-            color: #FFA07A;
-            word-wrap: break-word;
+        /* Full command string input */
+        #full-command-input-wrapper {
+            padding: 10px;
+            border-bottom: 1px solid rgba(78, 205, 196, 0.3);
+        }
+
+        #full-command-input {
+            width: 100%;
+            background: #0a0a0a;
+            border: 1px solid #4ECDC4;
+            border-radius: 3px;
+            padding: 8px;
             font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #fff;
+            outline: none;
         }
 
-        #command-string .branch {
-            margin: 3px 0;
-            display: block;
+        #full-command-input::placeholder {
+            color: #666;
         }
 
-        #command-string .branch.current {
-            color: #4ECDC4;
-            font-weight: bold;
+        /* Command list - text editor style */
+        #command-list {
+            flex: 1;
+            margin: 10px;
+            background: #0a0a0a;
+            border: 1px solid rgba(255, 160, 122, 0.3);
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: #FFA07A;
+            padding: 10px;
+            resize: none;
+            outline: none;
+            line-height: 1.6;
+            overflow-y: auto;
         }
 
-        #command-string .cmd-char {
-            display: inline-block;
-            padding: 2px 4px;
-            margin: 0 1px;
-            background: rgba(255, 255, 255, 0.1);
+        #command-list:focus {
+            border-color: #4ECDC4;
+            background: rgba(10, 10, 10, 0.95);
         }
 
-        #command-string .cmd-char.current {
-            background: #4ECDC4;
-            color: #000;
-        }
-
-        #command-string .cmd-char.future {
-            opacity: 0.4;
+        #command-list::placeholder {
+            color: #555;
         }
 
         #help {
@@ -384,9 +400,13 @@
         </div>
     </div>
 
-    <div id="command-history">
-        <h3>Command History</h3>
-        <div id="command-string"></div>
+    <!-- Command Editor - left sidebar -->
+    <div id="command-editor">
+        <h3>Commands</h3>
+        <div id="full-command-input-wrapper">
+            <input type="text" id="full-command-input" placeholder="Full command string (press Enter to rebuild)">
+        </div>
+        <textarea id="command-list" placeholder="Commands appear here... (edit and blur to rebuild)" spellcheck="false"></textarea>
     </div>
 
     <div id="help">
@@ -406,12 +426,14 @@
         <div class="cmd"><span class="key">q</span><span class="desc">cycle corners</span></div>
         <div class="cmd"><span class="key">space</span><span class="desc">snap to cursor</span></div>
         <div class="cmd"><span class="key">v</span><span class="desc">camera context</span></div>
-        <div class="cmd"><span class="key">v0-9</span><span class="desc">camera snap</span></div>
-        <div class="cmd"><span class="key">v8</span><span class="desc">toggle ortho</span></div>
-        <div class="cmd"><span class="key">vi/I</span><span class="desc">zoom in 5/10</span></div>
-        <div class="cmd"><span class="key">vk/K</span><span class="desc">zoom out 5/10</span></div>
-        <div class="cmd"><span class="key">vj/J</span><span class="desc">FOV +5°/+10°</span></div>
-        <div class="cmd"><span class="key">vl/L</span><span class="desc">FOV -5°/-10°</span></div>
+        <div class="cmd"><span class="key">v0-7</span><span class="desc">views (orbit)</span></div>
+        <div class="cmd"><span class="key">v8</span><span class="desc">smooth orbit</span></div>
+        <div class="cmd"><span class="key">v8IK</span><span class="desc">rotate lat</span></div>
+        <div class="cmd"><span class="key">v8JL</span><span class="desc">rotate lon</span></div>
+        <div class="cmd"><span class="key">v8ik/jl</span><span class="desc">stop rotation</span></div>
+        <div class="cmd"><span class="key">v9</span><span class="desc">toggle ortho</span></div>
+        <div class="cmd"><span class="key">vi/k</span><span class="desc">zoom in/out</span></div>
+        <div class="cmd"><span class="key">vj/l</span><span class="desc">FOV wider/narrow</span></div>
         <div class="cmd"><span class="key">p</span><span class="desc">color context</span></div>
         <div class="cmd"><span class="key">m</span><span class="desc">animate colors</span></div>
         <div class="cmd"><span class="key">mi/k</span><span class="desc">anim up/down</span></div>
@@ -486,8 +508,552 @@
         const commandTree = new CommandTree();
         const commandExecutor = new CommandExecutor(framework, paletteManager, renderer, commandTree, colorContext, cameraContext, selectionContext);
 
+        // Command chunks tracking
+        // Each chunk is either a single character or a compound command string like "(R,8)"
+        let commandChunks = [];
+        let isRebuilding = false; // Prevent recursive rebuilds
+        let isExecutingCompound = false; // Prevent tracking individual keys during compound command
+
         // Start rendering
         renderer.start();
+
+        // ===== COMMAND EDITOR FUNCTIONS =====
+
+        // Rebuild structure from command chunks
+        function rebuildFromChunks() {
+            if (isRebuilding) return; // Prevent recursion
+
+            isRebuilding = true;
+
+            // Clear framework
+            framework.clear();
+            paletteManager.reset();
+
+            // Reset accumulator
+            resetAccumulator();
+
+            // Save chunks before rebuilding
+            const chunksToRebuild = [...commandChunks];
+            commandChunks = []; // Clear so new executions don't add to it
+
+            // Execute each chunk
+            chunksToRebuild.forEach(chunk => {
+                originalExecuteCommandString(chunk);
+            });
+
+            // Restore chunks
+            commandChunks = chunksToRebuild;
+
+            updateCommandListUI();
+
+            isRebuilding = false;
+        }
+
+        // Group command chunks into lines intelligently
+        function groupCommandsIntoLines() {
+            const lines = [];
+            let currentLine = '';
+
+            commandChunks.forEach((chunk) => {
+                // If chunk is a compound command (contains parentheses), put on its own line
+                if (chunk.includes('(') || chunk.includes(')')) {
+                    // Start new line if current has content
+                    if (currentLine) {
+                        lines.push(currentLine);
+                        currentLine = '';
+                    }
+                    // Add compound command on its own line
+                    lines.push(chunk);
+                } else if (chunk.length === 1) {
+                    // Single character command
+                    const isIJKL = ['i', 'j', 'k', 'l', 'I', 'J', 'K', 'L'].includes(chunk);
+
+                    if (isIJKL && currentLine.length > 0) {
+                        // Append ijkl to current line
+                        currentLine += chunk;
+                    } else {
+                        // Start new line
+                        if (currentLine) {
+                            lines.push(currentLine);
+                        }
+                        currentLine = chunk;
+                    }
+                } else {
+                    // Multi-character non-compound command (shouldn't happen, but handle it)
+                    if (currentLine) {
+                        lines.push(currentLine);
+                    }
+                    currentLine = chunk;
+                }
+            });
+
+            // Push final line if any
+            if (currentLine) {
+                lines.push(currentLine);
+            }
+
+            return lines;
+        }
+
+        // Update the command list UI (textarea)
+        function updateCommandListUI() {
+            const commandList = document.getElementById('command-list');
+            const lines = groupCommandsIntoLines();
+            commandList.value = lines.join('\n');
+
+            // Update full command input to match
+            const fullCmdInput = document.getElementById('full-command-input');
+            fullCmdInput.value = commandChunks.join('');
+        }
+
+        // Parse textarea lines back into command chunks
+        function parseTextareaToChunks(text) {
+            const lines = text.split('\n').filter(line => line.trim().length > 0);
+            const chunks = [];
+
+            lines.forEach(line => {
+                line = line.trim();
+                if (line) {
+                    // Just add each line as a single command string
+                    // It will be executed as a command sequence
+                    chunks.push(line);
+                }
+            });
+
+            return chunks;
+        }
+
+        // Handle textarea editing
+        const commandListTextarea = document.getElementById('command-list');
+        let textareaEditInProgress = false;
+
+        commandListTextarea.addEventListener('focus', () => {
+            textareaEditInProgress = true;
+        });
+
+        commandListTextarea.addEventListener('blur', () => {
+            if (textareaEditInProgress) {
+                textareaEditInProgress = false;
+
+                console.log('Textarea blur - rebuilding from manual edits');
+
+                // Parse textarea content back to chunks
+                const newChunks = parseTextareaToChunks(commandListTextarea.value);
+
+                console.log('Old chunks:', commandChunks);
+                console.log('New chunks:', newChunks);
+
+                // Only rebuild if content changed
+                if (JSON.stringify(newChunks) !== JSON.stringify(commandChunks)) {
+                    commandChunks = newChunks;
+                    console.log('Content changed, rebuilding...');
+                    rebuildFromChunks();
+                    // Update full command input to match
+                    const fullCmdInput = document.getElementById('full-command-input');
+                    fullCmdInput.value = commandChunks.join('');
+                } else {
+                    console.log('Content unchanged, skipping rebuild');
+                }
+            }
+        });
+
+        // Also handle explicit Enter key in textarea to trigger rebuild
+        commandListTextarea.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                e.preventDefault();
+                console.log('Ctrl+Enter in textarea - forcing rebuild');
+
+                // Parse textarea content back to chunks
+                const newChunks = parseTextareaToChunks(commandListTextarea.value);
+                commandChunks = newChunks;
+                rebuildFromChunks();
+
+                // Update full command input to match
+                const fullCmdInput = document.getElementById('full-command-input');
+                fullCmdInput.value = commandChunks.join('');
+
+                // Blur the textarea to exit edit mode
+                commandListTextarea.blur();
+            }
+        });
+
+        // Parse full command string into chunks
+        // Splits by compound notation boundaries like "(cmd,N)"
+        function parseFullCommandToChunks(fullCmd) {
+            const chunks = [];
+            let i = 0;
+            let currentChunk = '';
+
+            while (i < fullCmd.length) {
+                const char = fullCmd[i];
+
+                if (char === '(') {
+                    // Save current chunk if any
+                    if (currentChunk) {
+                        chunks.push(currentChunk);
+                        currentChunk = '';
+                    }
+
+                    // Find matching closing paren
+                    let depth = 1;
+                    let j = i + 1;
+                    let compoundCmd = '(';
+
+                    while (j < fullCmd.length && depth > 0) {
+                        if (fullCmd[j] === '(') depth++;
+                        else if (fullCmd[j] === ')') depth--;
+                        compoundCmd += fullCmd[j];
+                        j++;
+                    }
+
+                    // Add compound command as its own chunk
+                    chunks.push(compoundCmd);
+                    i = j;
+                } else {
+                    // Regular character - accumulate
+                    currentChunk += char;
+                    i++;
+                }
+            }
+
+            // Add final chunk if any
+            if (currentChunk) {
+                chunks.push(currentChunk);
+            }
+
+            return chunks;
+        }
+
+        // Handle full command string input
+        const fullCmdInput = document.getElementById('full-command-input');
+        fullCmdInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const fullCmd = fullCmdInput.value.trim();
+
+                if (fullCmd) {
+                    // Parse into chunks intelligently
+                    commandChunks = parseFullCommandToChunks(fullCmd);
+
+                    // Rebuild
+                    rebuildFromChunks();
+                }
+            }
+        });
+
+        // Store original functions
+        const originalExecuteCommandString = commandExecutor.executeCommandString.bind(commandExecutor);
+        const originalExecuteKey = commandExecutor.executeKey.bind(commandExecutor);
+
+        // Track when a compound command is executed
+        commandExecutor.executeCommandString = function(cmdString) {
+            // Set flag to prevent tracking individual keys
+            isExecutingCompound = true;
+
+            // Execute
+            const result = originalExecuteCommandString(cmdString);
+
+            // Clear flag
+            isExecutingCompound = false;
+
+            // Add as a chunk (but not during rebuild)
+            if (!isRebuilding) {
+                commandChunks.push(cmdString);
+                updateCommandListUI();
+            }
+
+            return result;
+        };
+
+        // Check if character is an ijkl movement key
+        function isIJKLKey(char) {
+            return ['i', 'j', 'k', 'l', 'I', 'J', 'K', 'L'].includes(char);
+        }
+
+        // IJKL accumulator for compacting movements with cancellation
+        let ijklAccumulator = {
+            chunkIndex: -1,  // Which chunk this accumulator belongs to
+            prefix: '',      // The command prefix (like 't' or 'v')
+            iNet: 0,         // Net i/k movements (positive = i, negative = k)
+            jNet: 0,         // Net j/l movements (positive = j, negative = l)
+            INet: 0,         // Net I/K movements (shift versions)
+            JNet: 0          // Net J/L movements (shift versions)
+        };
+
+        // Convert accumulator to compact notation string
+        function accumulatorToString() {
+            let result = ijklAccumulator.prefix;
+
+            // Add movements in order: i/k, j/l, I/K, J/L
+            if (ijklAccumulator.iNet > 0) {
+                result += `(i,${ijklAccumulator.iNet})`;
+            } else if (ijklAccumulator.iNet < 0) {
+                result += `(k,${-ijklAccumulator.iNet})`;
+            }
+
+            if (ijklAccumulator.jNet > 0) {
+                result += `(j,${ijklAccumulator.jNet})`;
+            } else if (ijklAccumulator.jNet < 0) {
+                result += `(l,${-ijklAccumulator.jNet})`;
+            }
+
+            if (ijklAccumulator.INet > 0) {
+                result += `(I,${ijklAccumulator.INet})`;
+            } else if (ijklAccumulator.INet < 0) {
+                result += `(K,${-ijklAccumulator.INet})`;
+            }
+
+            if (ijklAccumulator.JNet > 0) {
+                result += `(J,${ijklAccumulator.JNet})`;
+            } else if (ijklAccumulator.JNet < 0) {
+                result += `(L,${-ijklAccumulator.JNet})`;
+            }
+
+            return result;
+        }
+
+        // Reset accumulator
+        function resetAccumulator() {
+            ijklAccumulator.chunkIndex = -1;
+            ijklAccumulator.prefix = '';
+            ijklAccumulator.iNet = 0;
+            ijklAccumulator.jNet = 0;
+            ijklAccumulator.INet = 0;
+            ijklAccumulator.JNet = 0;
+        }
+
+        // Check if we're in frame selection context (where cancellation rules differ)
+        function inFrameSelectionContext() {
+            return selectionContext.active;
+        }
+
+        // Add ijkl key to accumulator with cancellation
+        function addIJKLToAccumulator(key) {
+            const lastIndex = commandChunks.length - 1;
+
+            // If accumulator is for a different chunk or empty chunks, initialize
+            if (ijklAccumulator.chunkIndex !== lastIndex) {
+                // Flush any existing accumulator first
+                if (ijklAccumulator.chunkIndex >= 0 && ijklAccumulator.chunkIndex < commandChunks.length) {
+                    commandChunks[ijklAccumulator.chunkIndex] = accumulatorToString();
+                }
+
+                // Start new accumulator
+                ijklAccumulator.chunkIndex = lastIndex;
+                if (lastIndex >= 0) {
+                    ijklAccumulator.prefix = commandChunks[lastIndex];
+                } else {
+                    ijklAccumulator.prefix = '';
+                }
+                ijklAccumulator.iNet = 0;
+                ijklAccumulator.jNet = 0;
+                ijklAccumulator.INet = 0;
+                ijklAccumulator.JNet = 0;
+            }
+
+            // In frame selection context, don't use cancellation
+            const inSelection = inFrameSelectionContext();
+
+            // Update net counts based on key
+            switch(key) {
+                case 'i':
+                    ijklAccumulator.iNet++;
+                    break;
+                case 'k':
+                    if (inSelection) {
+                        // In selection, k is separate from i
+                        // Store as negative to distinguish, but will render separately
+                        ijklAccumulator.iNet--;
+                    } else {
+                        // Normal context: k cancels i
+                        ijklAccumulator.iNet--;
+                    }
+                    break;
+                case 'j':
+                    ijklAccumulator.jNet++;
+                    break;
+                case 'l':
+                    if (inSelection) {
+                        // In selection, l is separate from j
+                        ijklAccumulator.jNet--;
+                    } else {
+                        // Normal context: l cancels j
+                        ijklAccumulator.jNet--;
+                    }
+                    break;
+                case 'I':
+                    ijklAccumulator.INet++;
+                    break;
+                case 'K':
+                    if (inSelection) {
+                        ijklAccumulator.INet--;
+                    } else {
+                        ijklAccumulator.INet--;
+                    }
+                    break;
+                case 'J':
+                    ijklAccumulator.JNet++;
+                    break;
+                case 'L':
+                    if (inSelection) {
+                        ijklAccumulator.JNet--;
+                    } else {
+                        ijklAccumulator.JNet--;
+                    }
+                    break;
+            }
+
+            // Update the chunk with compacted notation
+            commandChunks[lastIndex] = accumulatorToString();
+        }
+
+        // Detect repeating pattern at the end of a string
+        function detectRepeatingPattern(str) {
+            if (str.length < 2) return null;
+
+            // Try pattern lengths from 1 to half the string length
+            for (let patternLen = 1; patternLen <= Math.floor(str.length / 2); patternLen++) {
+                const pattern = str.slice(-patternLen);
+                let count = 1;
+
+                // Check how many times this pattern repeats at the end
+                let pos = str.length - patternLen;
+                while (pos >= patternLen) {
+                    const prevPattern = str.slice(pos - patternLen, pos);
+                    if (prevPattern === pattern) {
+                        count++;
+                        pos -= patternLen;
+                    } else {
+                        break;
+                    }
+                }
+
+                // If pattern repeats at least 2 times, return it
+                if (count >= 2) {
+                    const prefix = str.slice(0, pos);
+                    return { prefix, pattern, count };
+                }
+            }
+
+            return null;
+        }
+
+        // Compact repeating patterns in the last chunk
+        function compactRepeatingPatterns() {
+            if (commandChunks.length === 0) return;
+
+            const lastIndex = commandChunks.length - 1;
+            let chunk = commandChunks[lastIndex];
+
+            // Check if chunk ends with existing repeat notation like "(dR,3)" followed by suffix
+            const repeatMatch = chunk.match(/^(.*)\(([^,]+),(\d+)\)(.*)$/);
+            if (repeatMatch) {
+                const prefix = repeatMatch[1];
+                const pattern = repeatMatch[2];
+                const count = parseInt(repeatMatch[3]);
+                const suffix = repeatMatch[4];
+
+                // Check if suffix matches the pattern (continuing the repeat)
+                if (suffix === pattern) {
+                    commandChunks[lastIndex] = `${prefix}(${pattern},${count + 1})`;
+                    return;
+                } else if (suffix.length > 0 && suffix.length < pattern.length) {
+                    // Suffix is a partial match - might be building up to the pattern, keep it
+                    return;
+                } else if (suffix.length > 0) {
+                    // Suffix doesn't match - check if it's a new pattern
+                    const suffixDetected = detectRepeatingPattern(suffix);
+                    if (suffixDetected) {
+                        const { prefix: suffixPrefix, pattern: suffixPattern, count: suffixCount } = suffixDetected;
+                        commandChunks[lastIndex] = `${prefix}(${pattern},${count})${suffixPrefix}(${suffixPattern},${suffixCount})`;
+                    } else {
+                        // Suffix is not a pattern - split it off into a new chunk
+                        commandChunks[lastIndex] = `${prefix}(${pattern},${count})`;
+                        commandChunks.push(suffix);
+                    }
+                }
+                return;
+            }
+
+            // Check for new repeating pattern
+            const detected = detectRepeatingPattern(chunk);
+            if (detected) {
+                const { prefix, pattern, count } = detected;
+                commandChunks[lastIndex] = `${prefix}(${pattern},${count})`;
+            } else if (chunk.length > 2) {
+                // No repeating pattern detected and chunk is getting long
+                // Check if the last character breaks a potential pattern
+                // For example: "dRf" should become "dR" and "f"
+                const withoutLast = chunk.slice(0, -1);
+                const lastChar = chunk.slice(-1);
+
+                const detectedWithoutLast = detectRepeatingPattern(withoutLast);
+                if (detectedWithoutLast) {
+                    // Previous part had a pattern, split off the last char
+                    const { prefix, pattern, count } = detectedWithoutLast;
+                    commandChunks[lastIndex] = `${prefix}(${pattern},${count})`;
+                    commandChunks.push(lastChar);
+                }
+            }
+        }
+
+        // Track when a single key is executed
+        commandExecutor.executeKey = function(key, shift) {
+            // Execute
+            const result = originalExecuteKey(key, shift);
+
+            // Add as a chunk (single character, but not during rebuild or compound execution)
+            if (!isRebuilding && !isExecutingCompound) {
+                // Check if it's an ijkl key that should be accumulated
+                if (isIJKLKey(key)) {
+                    // If no chunks yet, create an empty one to hold the movements
+                    if (commandChunks.length === 0) {
+                        commandChunks.push('');
+                    }
+                    addIJKLToAccumulator(key);
+                } else {
+                    // Non-ijkl key: flush accumulator and start new chunk
+                    if (ijklAccumulator.chunkIndex >= 0) {
+                        commandChunks[ijklAccumulator.chunkIndex] = accumulatorToString();
+                        resetAccumulator();
+                    }
+
+                    // Decide whether to append to last chunk or create new one
+                    if (commandChunks.length === 0) {
+                        // Start new chunk if empty
+                        commandChunks.push(key);
+                    } else {
+                        const lastChunk = commandChunks[commandChunks.length - 1];
+
+                        // Check if last chunk is a compacted pattern
+                        const repeatMatch = lastChunk.match(/^(.*)\(([^,]+),(\d+)\)$/);
+
+                        if (repeatMatch) {
+                            // Last chunk is compacted like "(dR,3)"
+                            const pattern = repeatMatch[2];
+
+                            // Check if this key could be the start of continuing the pattern
+                            if (pattern[0] === key) {
+                                // Might continue the pattern, append to try
+                                commandChunks[commandChunks.length - 1] += key;
+                            } else {
+                                // Doesn't match pattern start, new chunk
+                                commandChunks.push(key);
+                            }
+                        } else {
+                            // Last chunk is not compacted, just append
+                            commandChunks[commandChunks.length - 1] += key;
+                        }
+                    }
+
+                    // Try to detect repeating patterns
+                    compactRepeatingPatterns();
+                }
+                updateCommandListUI();
+            }
+
+            return result;
+        };
 
         // FPS counter
         let lastTime = performance.now();
@@ -642,7 +1208,7 @@
             document.getElementById('draw-calls').textContent = renderer.renderer.info.render.calls;
 
             // Update command history visualization
-            updateCommandHistoryUI();
+            // updateCommandHistoryUI();  // COMMENTED OUT FOR PERFORMANCE
 
             // Update color palette visualization
             updateColorPaletteUI();
@@ -681,21 +1247,93 @@
         function executeCompoundCommand() {
             const cmdString = commandInput.value.trim();
             if (cmdString) {
-                console.log('Executing compound command:', cmdString);
+                // console.log('Executing compound command:', cmdString);
                 commandExecutor.executeCommandString(cmdString);
                 lastCompoundCommand = cmdString;
             }
             closeCommandOverlay();
         }
 
-        // Repeat last command
-        function repeatLastCommand() {
-            if (lastCompoundCommand) {
-                console.log('Repeating last compound command:', lastCompoundCommand);
-                commandExecutor.executeCommandString(lastCompoundCommand);
-            } else {
-                console.log('No compound command to repeat');
+        // Parse repeat notation like (cmd,N) -> {command: 'cmd', count: N}
+        function parseRepeatNotation(str) {
+            if (!str.startsWith('(') || !str.endsWith(')')) {
+                return null;
             }
+
+            // Remove outer parentheses
+            const inner = str.slice(1, -1);
+
+            // Find the last comma at top level (not inside nested parens)
+            let depth = 0;
+            let lastCommaIndex = -1;
+
+            for (let i = 0; i < inner.length; i++) {
+                if (inner[i] === '(') depth++;
+                else if (inner[i] === ')') depth--;
+                else if (inner[i] === ',' && depth === 0) {
+                    lastCommaIndex = i;
+                }
+            }
+
+            if (lastCommaIndex === -1) {
+                return null; // No comma found, not a repeat notation
+            }
+
+            const command = inner.slice(0, lastCommaIndex);
+            const countStr = inner.slice(lastCommaIndex + 1).trim();
+            const count = parseInt(countStr);
+
+            if (isNaN(count)) {
+                return null; // Not a valid number
+            }
+
+            return { command, count };
+        }
+
+        // Wrap command in repeat notation or increment existing count
+        function incrementRepeatCommand(chunk) {
+            const parsed = parseRepeatNotation(chunk);
+
+            if (parsed) {
+                // Already wrapped, increment count
+                return `(${parsed.command},${parsed.count + 1})`;
+            } else {
+                // Not wrapped yet, wrap as (cmd,2)
+                return `(${chunk},2)`;
+            }
+        }
+
+        // Repeat last command by converting to nested notation
+        function repeatLastCommand() {
+            if (commandChunks.length === 0) {
+                return;
+            }
+
+            // Get the last chunk
+            const lastIndex = commandChunks.length - 1;
+            const lastChunk = commandChunks[lastIndex];
+
+            // Parse to see if it's already a repeat
+            const parsed = parseRepeatNotation(lastChunk);
+
+            // Set flag to prevent tracking individual keys
+            isExecutingCompound = true;
+
+            if (parsed) {
+                // Already wrapped like (cmd,N), execute base command once and increment
+                originalExecuteCommandString(parsed.command);
+                commandChunks[lastIndex] = `(${parsed.command},${parsed.count + 1})`;
+            } else {
+                // Not wrapped yet, execute once and wrap as (cmd,2)
+                originalExecuteCommandString(lastChunk);
+                commandChunks[lastIndex] = `(${lastChunk},2)`;
+            }
+
+            // Clear flag
+            isExecutingCompound = false;
+
+            // Update display
+            updateCommandListUI();
         }
 
         // Handle compound command input overlay
@@ -756,6 +1394,11 @@
 
         // Keyboard input
         document.addEventListener('keydown', (e) => {
+            // If command list textarea or full command input are focused, let them handle input
+            if (textareaEditInProgress || document.activeElement === fullCmdInput) {
+                return;
+            }
+
             // If compound command overlay is active, only handle Escape
             if (overlayActive) {
                 if (e.key === 'Escape') {
@@ -775,7 +1418,7 @@
                 return;
             }
 
-            console.log('Key pressed:', e.key);
+            // console.log('Key pressed:', e.key);
 
             // Handle special compound command key
             if (e.key === '/') {
@@ -804,20 +1447,20 @@
         // Export command string function (for later use)
         window.exportCommandString = function() {
             const cmdString = framework.commandHistory.join('');
-            console.log('Command string:', cmdString);
+            // console.log('Command string:', cmdString);
             return cmdString;
         };
 
         // Auto-execute command string (for replay)
         window.autoExecuteCommand = function(cmdString) {
-            console.log('Executing:', cmdString);
+            // console.log('Executing:', cmdString);
             commandExecutor.executeCommandString(cmdString);
         };
 
-        console.log('Frameworks V3 (Instanced) initialized');
-        console.log('Type "f" to create a frame, "t ijkl" to move');
-        console.log('Use exportCommandString() to get command history');
-        console.log('Instanced rendering: 100,000 frame capacity');
+        // console.log('Frameworks V3 (Instanced) initialized');
+        // console.log('Type "f" to create a frame, "t ijkl" to move');
+        // console.log('Use exportCommandString() to get command history');
+        // console.log('Instanced rendering: 100,000 frame capacity');
     </script>
 </body>
 </html>

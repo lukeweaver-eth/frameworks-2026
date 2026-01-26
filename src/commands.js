@@ -33,7 +33,7 @@ class CommandExecutor {
      */
     executeKey(key, shift = false) {
         const fw = this.framework;
-        console.log('executeKey called - key:', key, 'shift:', shift, 'mode:', fw.mode);
+        // console.log('executeKey called - key:', key, 'shift:', shift, 'mode:', fw.mode);
 
         // If camera context is enabled and active
         if (this.cameraContext && this.cameraContext.active) {
@@ -57,25 +57,25 @@ class CommandExecutor {
 
         // Mode-dependent commands (ijkl)
         if (fw.mode === 'animation') {
-            console.log('Animation mode - key:', key, 'shift:', shift);
+            // console.log('Animation mode - key:', key, 'shift:', shift);
             // If in animation mode, check if key is ijkl or JL (speed control)
             if (['i', 'j', 'k', 'l'].includes(key.toLowerCase())) {
                 // Check if shift is pressed for speed control
                 if ((key === 'J' || (key === 'j' && shift))) {
-                    console.log('Speed up detected!');
+                    // console.log('Speed up detected!');
                     return this.handleAnimationSpeedUp();
                 } else if ((key === 'L' || (key === 'l' && shift))) {
-                    console.log('Slow down detected!');
+                    // console.log('Slow down detected!');
                     return this.handleAnimationSlowDown();
                 } else {
                     // Regular direction keys (no shift)
-                    console.log('Direction key:', key.toLowerCase());
+                    // console.log('Direction key:', key.toLowerCase());
                     return this.handleAnimationDirection(key.toLowerCase());
                 }
             }
             // Any other key exits animation mode and executes normally
             fw.mode = 'normal';
-            console.log('Exiting animation mode');
+            // console.log('Exiting animation mode');
         } else if (fw.mode === 'translate') {
             // If in translate mode, check if key is ijkl
             if (['i', 'j', 'k', 'l'].includes(key)) {
@@ -83,7 +83,7 @@ class CommandExecutor {
             }
             // Any other key exits translate mode and executes normally
             fw.mode = 'normal';
-            console.log('Exiting translate mode');
+            // console.log('Exiting translate mode');
         } else if (fw.mode === 'translateCursor') {
             // If in translate cursor mode, check if key is ijkl
             if (['i', 'j', 'k', 'l'].includes(key)) {
@@ -91,7 +91,7 @@ class CommandExecutor {
             }
             // Any other key exits translate cursor mode and executes normally
             fw.mode = 'normal';
-            console.log('Exiting translate cursor mode');
+            // console.log('Exiting translate cursor mode');
         } else if (fw.mode === 'scale') {
             // If in scale mode, check if key is ik
             if (['i', 'k'].includes(key)) {
@@ -99,7 +99,7 @@ class CommandExecutor {
             }
             // Any other key exits scale mode and executes normally
             fw.mode = 'normal';
-            console.log('Exiting scale mode');
+            // console.log('Exiting scale mode');
         } else if (fw.mode === 'scaleSelection') {
             // If in scale selection mode, check if key is ik
             if (['i', 'k'].includes(key)) {
@@ -107,7 +107,7 @@ class CommandExecutor {
             }
             // Any other key exits scale selection mode and executes normally
             fw.mode = 'normal';
-            console.log('Exiting scale selection mode');
+            // console.log('Exiting scale selection mode');
         }
 
         // Normal mode commands
@@ -126,21 +126,21 @@ class CommandExecutor {
             // Translation modes
             case 't':
                 fw.mode = 'translate';
-                console.log('Translate mode (frames)');
+                // console.log('Translate mode (frames)');
                 break;
             case 'T':
                 fw.mode = 'translateCursor';
-                console.log('Translate mode (cursor)');
+                // console.log('Translate mode (cursor)');
                 break;
 
             // Scale modes
             case 's':
                 fw.mode = 'scale';
-                console.log('Scale mode (individual frames)');
+                // console.log('Scale mode (individual frames)');
                 break;
             case 'S':
                 fw.mode = 'scaleSelection';
-                console.log('Scale mode (entire selection)');
+                // console.log('Scale mode (entire selection)');
                 break;
 
             // Rotation
@@ -189,7 +189,7 @@ class CommandExecutor {
                     this.colorContext.enter();
                     // Reset mode when entering color context
                     fw.mode = 'normal';
-                    console.log('Entered color context');
+                    // console.log('Entered color context');
                 } else {
                     // Fallback to cycle color if no context
                     this.cycleColorForward();
@@ -202,7 +202,7 @@ class CommandExecutor {
                     this.selectionContext.enter();
                     // Reset mode when entering selection context
                     fw.mode = 'normal';
-                    console.log('Entered frame selection context');
+                    // console.log('Entered frame selection context');
                 }
                 break;
 
@@ -222,16 +222,16 @@ class CommandExecutor {
                     this.cameraContext.enter();
                     // Reset mode when entering camera context
                     fw.mode = 'normal';
-                    console.log('Entered camera context');
+                    // console.log('Entered camera context');
                 } else {
-                    console.log('Camera context not enabled');
+                    // console.log('Camera context not enabled');
                 }
                 break;
 
             // Animation mode
             case 'm':
                 fw.mode = 'animation';
-                console.log('Animation mode - press i/j/k/l to set direction');
+                // console.log('Animation mode - press i/j/k/l to set direction');
                 break;
 
             // Command context (undo/fork navigation)
@@ -241,10 +241,10 @@ class CommandExecutor {
                     // Reset mode when entering command context
                     if (this.commandTree.inCommandContext) {
                         fw.mode = 'normal';
-                        console.log('Entered command context - mode reset to normal');
+                        // console.log('Entered command context - mode reset to normal');
                     }
                 } else {
-                    console.log('Command tree not enabled');
+                    // console.log('Command tree not enabled');
                 }
                 break;
 
@@ -257,17 +257,17 @@ class CommandExecutor {
             case '5':
             case '6':
                 fw.currentView = parseInt(key);
-                console.log('Transformation view:', fw.currentView);
+                // console.log('Transformation view:', fw.currentView);
                 break;
 
             // Escape - exit modes
             case 'Escape':
                 fw.mode = 'normal';
-                console.log('Normal mode');
+                // console.log('Normal mode');
                 break;
 
             default:
-                console.log('Unknown command:', key);
+                // console.log('Unknown command:', key);
         }
 
         // Record command
@@ -412,7 +412,7 @@ class CommandExecutor {
         fw.deselectAll();
         fw.addFrame(frame);
 
-        console.log('Created frame at', fw.cursor.x, fw.cursor.y, fw.cursor.z, 'normal:', ihat, jhat, khat);
+        // console.log('Created frame at', fw.cursor.x, fw.cursor.y, fw.cursor.z, 'normal:', ihat, jhat, khat);
     }
 
     /**
@@ -423,7 +423,7 @@ class CommandExecutor {
         const selected = fw.getSelectedFrames();
 
         if (selected.length === 0) {
-            console.log('No frames selected');
+            // console.log('No frames selected');
             return;
         }
 
@@ -436,7 +436,7 @@ class CommandExecutor {
             fw.addFrame(dup);
         });
 
-        console.log('Duplicated', selected.length, 'frames in place');
+        // console.log('Duplicated', selected.length, 'frames in place');
     }
 
     /**
@@ -447,14 +447,14 @@ class CommandExecutor {
         const selected = fw.getSelectedFrames();
 
         if (selected.length === 0) {
-            console.log('No frames selected');
+            // console.log('No frames selected');
             return;
         }
 
         // Remove selected frames from the framework
         fw.frames = fw.frames.filter(frame => !frame.selected);
 
-        console.log('Deleted', selected.length, 'frames');
+        // console.log('Deleted', selected.length, 'frames');
     }
 
     /**
@@ -494,7 +494,7 @@ class CommandExecutor {
             frame.rotate(fw.cursor.x, fw.cursor.y, fw.cursor.z, angle, axis);
         });
 
-        console.log('Rotated', selected.length, 'frames by', angle, 'radians around', axis, 'axis');
+        // console.log('Rotated', selected.length, 'frames by', angle, 'radians around', axis, 'axis');
     }
 
     /**
@@ -549,7 +549,7 @@ class CommandExecutor {
             }
         });
 
-        console.log('Reflected', selected.length, 'frames horizontally across', reflectAxis, 'coordinate at cursor');
+        // console.log('Reflected', selected.length, 'frames horizontally across', reflectAxis, 'coordinate at cursor');
     }
 
     /**
@@ -602,7 +602,7 @@ class CommandExecutor {
             }
         });
 
-        console.log('Reflected', selected.length, 'frames vertically across', reflectAxis, 'coordinate at cursor');
+        // console.log('Reflected', selected.length, 'frames vertically across', reflectAxis, 'coordinate at cursor');
     }
 
     /**
@@ -621,7 +621,7 @@ class CommandExecutor {
             }
         });
 
-        console.log('Selected all frames with color', targetColor);
+        // console.log('Selected all frames with color', targetColor);
     }
 
     /**
@@ -648,7 +648,7 @@ class CommandExecutor {
             frame.translate(dx, dy, dz);
         });
 
-        console.log('Snapped selection to cursor');
+        // console.log('Snapped selection to cursor');
     }
 
     /**
@@ -660,7 +660,7 @@ class CommandExecutor {
         const fw = this.framework;
 
         if (fw.frames.length === 0) {
-            console.log('No frames to center');
+            // console.log('No frames to center');
             return;
         }
 
@@ -677,7 +677,7 @@ class CommandExecutor {
             frame.translate(dx, dy, dz);
         });
 
-        console.log(`Centered structure to cursor: bbox center (${bbox.centerX.toFixed(2)}, ${bbox.centerY.toFixed(2)}, ${bbox.centerZ.toFixed(2)}) → cursor (${fw.cursor.x}, ${fw.cursor.y}, ${fw.cursor.z})`);
+        // console.log(`Centered structure to cursor: bbox center (${bbox.centerX.toFixed(2)}, ${bbox.centerY.toFixed(2)}, ${bbox.centerZ.toFixed(2)}) → cursor (${fw.cursor.x}, ${fw.cursor.y}, ${fw.cursor.z})`);
     }
 
     /**
@@ -792,7 +792,7 @@ class CommandExecutor {
         const fw = this.framework;
 
         if (fw.frames.length === 0) {
-            console.log('No frames - cannot cycle corners');
+            // console.log('No frames - cannot cycle corners');
             return;
         }
 
@@ -804,7 +804,7 @@ class CommandExecutor {
         fw.cursor.y = corner.y;
         fw.cursor.z = corner.z;
 
-        console.log(`Moved cursor to corner ${this.cornerIndex}: (${corner.x.toFixed(2)}, ${corner.y.toFixed(2)}, ${corner.z.toFixed(2)})`);
+        // console.log(`Moved cursor to corner ${this.cornerIndex}: (${corner.x.toFixed(2)}, ${corner.y.toFixed(2)}, ${corner.z.toFixed(2)})`);
 
         // Increment corner index (wraps 0-7)
         this.cornerIndex = (this.cornerIndex + 1) % 8;
@@ -821,7 +821,7 @@ class CommandExecutor {
             this.renderer.setUIVisible(this.uiVisible);
         }
 
-        console.log('UI visibility:', this.uiVisible ? 'shown' : 'hidden');
+        // console.log('UI visibility:', this.uiVisible ? 'shown' : 'hidden');
     }
 
     /**
@@ -836,7 +836,7 @@ class CommandExecutor {
             this.animationActive = false;
             this.animationDirection = null;
             this.animationTimer = 0;
-            console.log('Animation stopped');
+            // console.log('Animation stopped');
             fw.mode = 'normal';
         } else {
             // Start/change animation direction
@@ -850,7 +850,7 @@ class CommandExecutor {
                 'j': 'left (structure backward)',
                 'l': 'right (structure forward)'
             };
-            console.log('Animation started:', directions[key], `at ${this.animationInterval.toFixed(1)}ms interval`);
+            // console.log('Animation started:', directions[key], `at ${this.animationInterval.toFixed(1)}ms interval`);
             // Keep animation mode active so user can adjust speed with J/L
             // (don't set fw.mode = 'normal' here)
         }
@@ -876,7 +876,7 @@ class CommandExecutor {
         );
 
         const fps = (1000 / this.animationInterval).toFixed(1);
-        console.log(`Animation speed: ${this.animationInterval.toFixed(1)}ms (${fps} shifts/sec)`);
+        // console.log(`Animation speed: ${this.animationInterval.toFixed(1)}ms (${fps} shifts/sec)`);
 
         // Record command
         fw.commandHistory.push('J');
@@ -899,7 +899,7 @@ class CommandExecutor {
         );
 
         const fps = (1000 / this.animationInterval).toFixed(1);
-        console.log(`Animation speed: ${this.animationInterval.toFixed(1)}ms (${fps} shifts/sec)`);
+        // console.log(`Animation speed: ${this.animationInterval.toFixed(1)}ms (${fps} shifts/sec)`);
 
         // Record command
         fw.commandHistory.push('L');
@@ -958,7 +958,7 @@ class CommandExecutor {
                             frame.color = this.colorContext.colors[newIndex];
                         }
                     });
-                    console.log('Animated', fw.frames.length, 'frames in direction:', this.animationDirection);
+                    // console.log('Animated', fw.frames.length, 'frames in direction:', this.animationDirection);
                 }
             }
         }
@@ -983,7 +983,7 @@ class CommandExecutor {
             frame.color = newColor;
         });
 
-        console.log('Changed color to', newColor);
+        // console.log('Changed color to', newColor);
     }
 
     /**
@@ -1017,7 +1017,7 @@ class CommandExecutor {
             this.commandTree.addCommand(key);
         }
 
-        console.log('Scaled frames by', scaleFactor);
+        // console.log('Scaled frames by', scaleFactor);
     }
 
     /**
@@ -1069,7 +1069,7 @@ class CommandExecutor {
             this.commandTree.addCommand(key);
         }
 
-        console.log('Scaled entire selection by', scaleFactor);
+        // console.log('Scaled entire selection by', scaleFactor);
     }
 
     /**
@@ -1142,7 +1142,7 @@ class CommandExecutor {
             this.commandTree.addCommand(key);
         }
 
-        console.log('Cursor moved to', fw.cursor.x, fw.cursor.y, fw.cursor.z);
+        // console.log('Cursor moved to', fw.cursor.x, fw.cursor.y, fw.cursor.z);
     }
 
     /**
@@ -1164,7 +1164,7 @@ class CommandExecutor {
         }
 
         const viewNames = ['Spatial', 'Front', 'Right', 'Back', 'Left', 'Top', 'Bottom'];
-        console.log('View:', viewNames[viewNumber]);
+        // console.log('View:', viewNames[viewNumber]);
     }
 
     /**
@@ -1233,15 +1233,61 @@ class CommandExecutor {
     }
 
     /**
+     * Condense a command string by grouping consecutive identical characters
+     * Example: "ijijij" -> "(i,3)(j,3)"
+     * Example: "ftiiijjjjRRd" -> "ft(i,3)(j,4)(R,2)d"
+     *
+     * @param {string} cmdString - Raw command string
+     * @returns {string} - Condensed command string with repeat notation
+     */
+    condenseCommandString(cmdString) {
+        if (!cmdString || cmdString.length === 0) return '';
+
+        let result = '';
+        let i = 0;
+
+        while (i < cmdString.length) {
+            const currentChar = cmdString[i];
+            let count = 1;
+
+            // Count consecutive identical characters
+            while (i + count < cmdString.length && cmdString[i + count] === currentChar) {
+                count++;
+            }
+
+            // If count is 1, just append the character
+            // If count >= 2, use repeat notation
+            if (count === 1) {
+                result += currentChar;
+            } else {
+                result += `(${currentChar},${count})`;
+            }
+
+            i += count;
+        }
+
+        return result;
+    }
+
+    /**
+     * Get condensed command history from framework
+     * @returns {string} - Condensed command string
+     */
+    getCondensedCommands() {
+        const rawCommands = this.framework.commandHistory.join('');
+        return this.condenseCommandString(rawCommands);
+    }
+
+    /**
      * Execute a command string (for replay)
      * Supports repeat notation: (command,count)
      */
     executeCommandString(cmdString) {
         // First expand any repeat notation
         const expanded = this.expandRepeats(cmdString);
-        console.log('Executing command string:', cmdString);
+        // console.log('Executing command string:', cmdString);
         if (cmdString !== expanded) {
-            console.log('Expanded to:', expanded);
+            // console.log('Expanded to:', expanded);
         }
 
         // Execute each character
@@ -1331,14 +1377,13 @@ class CommandExecutor {
             return;
         }
 
-        // Check if this is a navigation key (zoom/FOV)
-        const isNavKey = ['i', 'I', 'j', 'k', 'K', 'l'].includes(key);
+        // Check if this is a navigation key (zoom/FOV or orbit control)
+        const isNavKey = ['i', 'I', 'j', 'J', 'k', 'K', 'l', 'L'].includes(key);
 
         if (isNavKey) {
-            // Navigate (zoom/FOV adjustments)
-            const lowerKey = key.toLowerCase();
-            const isShift = key !== lowerKey || shift;
-            ctx.navigate(lowerKey, isShift);
+            // Navigate (zoom/FOV adjustments or orbit control in v8 mode)
+            // Pass the key as-is to let context-camera.js handle uppercase/lowercase
+            ctx.navigate(key, shift);
 
             // Record navigation in command tree
             fw.commandHistory.push(key);
@@ -1457,7 +1502,7 @@ class CommandExecutor {
                 }
             } else if (isShift && (lowerKey === 'i' || lowerKey === 'k')) {
                 // TODO: I/K operations - available for new functions
-                console.log('I/K pressed - not yet implemented');
+                // console.log('I/K pressed - not yet implemented');
             } else {
                 // Regular navigation (ijkl)
                 switch (lowerKey) {
@@ -1523,7 +1568,7 @@ class CommandExecutor {
     reconstructState() {
         const cmdSequence = this.commandTree.getCurrentCommandSequence();
 
-        console.log('Reconstructing state from', cmdSequence.length, 'commands');
+        // console.log('Reconstructing state from', cmdSequence.length, 'commands');
 
         // Clear the framework
         this.framework.clear();
@@ -1543,7 +1588,7 @@ class CommandExecutor {
         // Restore command context state
         this.commandTree.inCommandContext = wasInCommandContext;
 
-        console.log('State reconstructed:', this.framework.frames.length, 'frames');
+        // console.log('State reconstructed:', this.framework.frames.length, 'frames');
     }
 
     /**

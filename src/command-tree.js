@@ -59,7 +59,7 @@ class CommandTree {
         this.currentRow++;
         this.currentCol = newBranch.length - 1;
 
-        console.log(`Created fork at row ${this.currentRow}, column ${this.currentCol}`);
+        // console.log(`Created fork at row ${this.currentRow}, column ${this.currentCol}`);
     }
 
     /**
@@ -69,10 +69,10 @@ class CommandTree {
     moveBack() {
         if (this.currentCol > -1) {
             this.currentCol--;
-            console.log(`Moved back to position ${this.currentCol} in branch ${this.currentRow}`);
+            // console.log(`Moved back to position ${this.currentCol} in branch ${this.currentRow}`);
             return true;
         }
-        console.log('Already at start of branch');
+        // console.log('Already at start of branch');
         return false;
     }
 
@@ -84,10 +84,10 @@ class CommandTree {
         const currentBranch = this.branches[this.currentRow];
         if (this.currentCol < currentBranch.length - 1) {
             this.currentCol++;
-            console.log(`Moved forward to position ${this.currentCol} in branch ${this.currentRow}`);
+            // console.log(`Moved forward to position ${this.currentCol} in branch ${this.currentRow}`);
             return true;
         }
-        console.log('Already at end of branch');
+        // console.log('Already at end of branch');
         return false;
     }
 
@@ -101,10 +101,10 @@ class CommandTree {
             // Clamp column to valid range in new branch
             const newBranch = this.branches[this.currentRow];
             this.currentCol = Math.min(this.currentCol, newBranch.length - 1);
-            console.log(`Moved up to branch ${this.currentRow}, position ${this.currentCol}`);
+            // console.log(`Moved up to branch ${this.currentRow}, position ${this.currentCol}`);
             return true;
         }
-        console.log('Already at first branch');
+        // console.log('Already at first branch');
         return false;
     }
 
@@ -118,10 +118,10 @@ class CommandTree {
             // Clamp column to valid range in new branch
             const newBranch = this.branches[this.currentRow];
             this.currentCol = Math.min(this.currentCol, newBranch.length - 1);
-            console.log(`Moved down to branch ${this.currentRow}, position ${this.currentCol}`);
+            // console.log(`Moved down to branch ${this.currentRow}, position ${this.currentCol}`);
             return true;
         }
-        console.log('Already at last branch');
+        // console.log('Already at last branch');
         return false;
     }
 
@@ -179,7 +179,7 @@ class CommandTree {
      */
     toggleCommandContext() {
         this.inCommandContext = !this.inCommandContext;
-        console.log('Command context:', this.inCommandContext ? 'ACTIVE' : 'INACTIVE');
+        // console.log('Command context:', this.inCommandContext ? 'ACTIVE' : 'INACTIVE');
         return this.inCommandContext;
     }
 
@@ -188,7 +188,7 @@ class CommandTree {
      */
     enterCommandContext() {
         this.inCommandContext = true;
-        console.log('Entered command context mode');
+        // console.log('Entered command context mode');
     }
 
     /**
@@ -196,7 +196,7 @@ class CommandTree {
      */
     exitCommandContext() {
         this.inCommandContext = false;
-        console.log('Exited command context mode');
+        // console.log('Exited command context mode');
     }
 
     /**

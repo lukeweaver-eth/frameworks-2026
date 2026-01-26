@@ -348,15 +348,17 @@ class FrameworksInstancedRenderer {
 
         // Create instance attribute buffers (pre-allocated for maxFrames)
         this.offsets = new Float32Array(this.maxFrames * 3);
-        this.rotations = new Float32Array(this.maxFrames);
-        this.normals = new Float32Array(this.maxFrames * 3); // î ĵ k̂ normal direction
+        this.rights = new Float32Array(this.maxFrames * 3); // Right vector (X-axis)
+        this.ups = new Float32Array(this.maxFrames * 3); // Up vector (Y-axis)
+        this.normals = new Float32Array(this.maxFrames * 3); // Normal vector (Z-axis)
         this.scales = new Float32Array(this.maxFrames);
         this.colors = new Float32Array(this.maxFrames * 3);
         this.selected = new Float32Array(this.maxFrames);
 
         // Add instance attributes
         geometry.setAttribute('offset', new THREE.InstancedBufferAttribute(this.offsets, 3));
-        geometry.setAttribute('rotation', new THREE.InstancedBufferAttribute(this.rotations, 1));
+        geometry.setAttribute('frameRight', new THREE.InstancedBufferAttribute(this.rights, 3));
+        geometry.setAttribute('frameUp', new THREE.InstancedBufferAttribute(this.ups, 3));
         geometry.setAttribute('frameNormal', new THREE.InstancedBufferAttribute(this.normals, 3));
         geometry.setAttribute('scale', new THREE.InstancedBufferAttribute(this.scales, 1));
         geometry.setAttribute('instanceColor', new THREE.InstancedBufferAttribute(this.colors, 3));
@@ -365,8 +367,9 @@ class FrameworksInstancedRenderer {
         // Custom shader material
         const vertexShader = `
             attribute vec3 offset;
-            attribute float rotation;
-            attribute vec3 frameNormal;
+            attribute vec3 frameRight;   // X-axis of frame (tangent)
+            attribute vec3 frameUp;      // Y-axis of frame (bitangent)
+            attribute vec3 frameNormal;  // Z-axis of frame (normal)
             attribute float scale;
             attribute vec3 instanceColor;
             attribute float instanceSelected;
@@ -374,82 +377,20 @@ class FrameworksInstancedRenderer {
             varying vec3 vColor;
             varying float vSelected;
 
-            // Create rotation matrix to align frame with its normal direction
-            // Uses world-relative algorithm to maintain consistent "up" direction
-            mat3 createOrientationMatrix(vec3 normal) {
-                // Normalize input (should already be normalized, but just in case)
-                vec3 n = normalize(normal);
-
-                // Default frame is in XY plane with normal pointing in +Z
-                vec3 defaultNormal = vec3(0.0, 0.0, 1.0);
-
-                // If normal is same as default, return identity
-                if (length(n - defaultNormal) < 0.001) {
-                    return mat3(1.0);
-                }
-
-                // Build an orthonormal basis with n as the Z axis
-                // Use world +Y as reference "up" direction for consistency
-                vec3 worldUp = vec3(0.0, 1.0, 0.0);
-
-                // If normal is parallel to worldUp, use worldRight as reference instead
-                vec3 reference;
-                if (abs(dot(n, worldUp)) > 0.999) {
-                    reference = vec3(1.0, 0.0, 0.0); // Use +X when normal is ±Y
-                } else {
-                    reference = worldUp;
-                }
-
-                // Tangent (right) = perpendicular to both normal and reference
-                // This gives us a consistent "right" direction
-                vec3 tangent = normalize(cross(reference, n));
-
-                // Bitangent (up) = perpendicular to tangent and normal
-                // This is the frame's local "up" direction
-                vec3 bitangent = normalize(cross(n, tangent));
-
-                // Build rotation matrix with consistent orientation:
-                // - tangent as new X axis (right direction in frame's plane)
-                // - bitangent as new Y axis (up direction in frame's plane)
-                // - n as new Z axis (normal direction, pointing out of frame)
-                return mat3(
-                    tangent.x, tangent.y, tangent.z,
-                    bitangent.x, bitangent.y, bitangent.z,
-                    n.x, n.y, n.z
-                );
-            }
-
-            // Rodrigues' rotation formula: rotate vector v around axis k by angle theta
-            vec3 rotateAroundAxis(vec3 v, vec3 k, float theta) {
-                // k must be normalized
-                vec3 kn = normalize(k);
-                float cosTheta = cos(theta);
-                float sinTheta = sin(theta);
-
-                // Rodrigues' formula: v_rot = v*cos(θ) + (k×v)*sin(θ) + k*(k·v)*(1-cos(θ))
-                return v * cosTheta + cross(kn, v) * sinTheta + kn * dot(kn, v) * (1.0 - cosTheta);
-            }
-
             void main() {
                 // Scale the base geometry
                 vec3 pos = position * scale;
 
-                // Apply roll rotation FIRST (in local space, around Z axis)
-                // Roll rotates the frame in its own plane before orienting
-                if (abs(rotation) > 0.001) {
-                    float c = cos(rotation);
-                    float s = sin(rotation);
-                    // Rotate in XY plane (around Z axis)
-                    pos = vec3(
-                        pos.x * c - pos.y * s,
-                        pos.x * s + pos.y * c,
-                        pos.z
-                    );
-                }
+                // Build orientation matrix directly from stored basis vectors
+                // The frame stores a complete orthonormal basis (right, up, normal)
+                // which defines its full 3D orientation
+                mat3 orientation = mat3(
+                    frameRight.x, frameRight.y, frameRight.z,      // X-axis
+                    frameUp.x, frameUp.y, frameUp.z,                // Y-axis
+                    frameNormal.x, frameNormal.y, frameNormal.z    // Z-axis
+                );
 
-                // Then orient frame to align with its normal direction
-                // This transforms from local XY plane to world orientation
-                mat3 orientation = createOrientationMatrix(frameNormal);
+                // Transform from local XY plane to world orientation
                 pos = orientation * pos;
 
                 // Translate to instance position
@@ -513,10 +454,17 @@ class FrameworksInstancedRenderer {
             this.offsets[i * 3 + 1] = frame.y;
             this.offsets[i * 3 + 2] = frame.z;
 
-            // Rotation (roll angle)
-            this.rotations[i] = frame.roll;
+            // Right vector (X-axis of frame)
+            this.rights[i * 3] = frame.rightX;
+            this.rights[i * 3 + 1] = frame.rightY;
+            this.rights[i * 3 + 2] = frame.rightZ;
 
-            // Normal direction (î ĵ k̂)
+            // Up vector (Y-axis of frame)
+            this.ups[i * 3] = frame.upX;
+            this.ups[i * 3 + 1] = frame.upY;
+            this.ups[i * 3 + 2] = frame.upZ;
+
+            // Normal vector (Z-axis of frame)
             this.normals[i * 3] = frame.ihat;
             this.normals[i * 3 + 1] = frame.jhat;
             this.normals[i * 3 + 2] = frame.khat;
@@ -536,7 +484,8 @@ class FrameworksInstancedRenderer {
 
         // Mark attributes as needing update
         this.instancedMesh.geometry.attributes.offset.needsUpdate = true;
-        this.instancedMesh.geometry.attributes.rotation.needsUpdate = true;
+        this.instancedMesh.geometry.attributes.frameRight.needsUpdate = true;
+        this.instancedMesh.geometry.attributes.frameUp.needsUpdate = true;
         this.instancedMesh.geometry.attributes.frameNormal.needsUpdate = true;
         this.instancedMesh.geometry.attributes.scale.needsUpdate = true;
         this.instancedMesh.geometry.attributes.instanceColor.needsUpdate = true;
@@ -662,7 +611,7 @@ class FrameworksInstancedRenderer {
             }
         });
 
-        console.log('UI elements', visible ? 'shown' : 'hidden');
+        // console.log('UI elements', visible ? 'shown' : 'hidden');
     }
 
     /**
@@ -687,7 +636,8 @@ class FrameworksInstancedRenderer {
             this.camera = this.perspectiveCamera;
             this.perspectiveCamera.fov = fov;
             this.perspectiveCamera.updateProjectionMatrix();
-            this.controls.enabled = (viewNumber === 0); // Only enable controls for spatial view
+            // All views now have orbit controls enabled (spatial by default)
+            this.controls.enabled = true;
         }
 
         // Set camera position based on view
@@ -698,48 +648,56 @@ class FrameworksInstancedRenderer {
                 this.dimAllFaceOutlines();
                 break;
 
-            case 1: // Front (looking from +Z)
+            case 1: // Front (looking from +Z) - snaps to view but allows orbit
                 this.positionCamera(0, 0, zoom, 0, 1, 0);
+                this.syncOrbitControlsToCamera();
                 this.highlightFace(1);
                 break;
 
-            case 2: // Right (looking from +X)
+            case 2: // Right (looking from +X) - snaps to view but allows orbit
                 this.positionCamera(zoom, 0, 0, 0, 1, 0);
+                this.syncOrbitControlsToCamera();
                 this.highlightFace(2);
                 break;
 
-            case 3: // Back (looking from -Z)
+            case 3: // Back (looking from -Z) - snaps to view but allows orbit
                 this.positionCamera(0, 0, -zoom, 0, 1, 0);
+                this.syncOrbitControlsToCamera();
                 this.highlightFace(3);
                 break;
 
-            case 4: // Left (looking from -X)
+            case 4: // Left (looking from -X) - snaps to view but allows orbit
                 this.positionCamera(-zoom, 0, 0, 0, 1, 0);
+                this.syncOrbitControlsToCamera();
                 this.highlightFace(4);
                 break;
 
-            case 5: // Top (looking from +Y)
+            case 5: // Top (looking from +Y) - snaps to view but allows orbit
                 this.positionCamera(0, zoom, 0, 0, 0, -1);
+                this.syncOrbitControlsToCamera();
                 this.highlightFace(5);
                 break;
 
-            case 6: // Bottom (looking from -Y)
+            case 6: // Bottom (looking from -Y) - snaps to view but allows orbit
                 this.positionCamera(0, -zoom, 0, 0, 0, 1);
+                this.syncOrbitControlsToCamera();
                 this.highlightFace(6);
                 break;
 
-            case 7: // Isometric (45° from XZ plane, 45° from XY plane)
+            case 7: // Isometric (45° from XZ plane, 45° from XY plane) - snaps to view but allows orbit
                 const isoDistance = zoom * Math.sqrt(3);
                 this.positionCamera(isoDistance / Math.sqrt(3), isoDistance / Math.sqrt(3), isoDistance / Math.sqrt(3), 0, 1, 0);
+                this.syncOrbitControlsToCamera();
                 this.dimAllFaceOutlines();
                 break;
 
-            case 9: // Auto-orbit will be handled in animation loop
+            case 8: // Auto-orbit mode - disable controls, manual orbit with ijkl
+                this.controls.enabled = false;  // Disable mouse orbit in auto-orbit mode
                 this.dimAllFaceOutlines();
                 break;
         }
 
-        console.log('View:', viewNames[viewNumber], orthographic ? '(orthographic)' : '(perspective)');
+        // console.log('View:', viewNames[viewNumber], orthographic ? '(orthographic)' : '(perspective)');
     }
 
     /**
@@ -749,6 +707,20 @@ class FrameworksInstancedRenderer {
         this.camera.position.set(x, y, z);
         this.camera.up.set(upX, upY, upZ);
         this.camera.lookAt(0, 0, 0);
+    }
+
+    /**
+     * Sync orbit controls spherical coordinates to match current camera position
+     * Call this after manually positioning the camera to enable smooth orbiting from that position
+     */
+    syncOrbitControlsToCamera() {
+        if (!this.controls || !this.controls.spherical) return;
+
+        // Calculate spherical coordinates from camera position
+        const position = new THREE.Vector3().copy(this.camera.position);
+        position.sub(this.controls.target);
+
+        this.controls.spherical.setFromVector3(position);
     }
 
     /**
@@ -823,7 +795,7 @@ class FrameworksInstancedRenderer {
     }
 
     /**
-     * Set auto-orbit angle
+     * Set auto-orbit angle (automatic rotation)
      */
     setAutoOrbitAngle(angle, radius) {
         if (!this.autoOrbitMode) return;
@@ -835,6 +807,39 @@ class FrameworksInstancedRenderer {
 
         this.camera.position.set(x, y, z);
         this.camera.lookAt(0, 0, 0);
+    }
+
+    /**
+     * Set manual orbit position (for ijkl control in v8 mode)
+     * @param {number} theta - Azimuth angle (longitude, around Y axis)
+     * @param {number} phi - Polar angle (latitude, from north pole)
+     * @param {number} radius - Distance from origin
+     */
+    setManualOrbitPosition(theta, phi, radius) {
+        // Convert spherical to cartesian
+        const x = radius * Math.sin(phi) * Math.sin(theta);
+        const y = radius * Math.cos(phi);
+        const z = radius * Math.sin(phi) * Math.cos(theta);
+
+        this.camera.position.set(x, y, z);
+        this.camera.lookAt(0, 0, 0);
+    }
+
+    /**
+     * Get current camera position as spherical coordinates
+     * @returns {object} - {theta, phi, radius} spherical coordinates
+     */
+    getCurrentCameraSpherical() {
+        const position = new THREE.Vector3().copy(this.camera.position);
+        const radius = position.length();
+
+        // Convert to spherical coordinates
+        // theta = azimuth (longitude) around Y axis
+        // phi = polar angle (latitude) from north pole
+        const theta = Math.atan2(position.x, position.z);
+        const phi = Math.acos(position.y / radius);
+
+        return { theta, phi, radius };
     }
 }
 
