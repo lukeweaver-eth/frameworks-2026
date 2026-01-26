@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Frameworks</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #101010;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: monospace;
+            color: #50FF50;
+        }
+        #container {
+            text-align: center;
+        }
+        #game {
+            border: 1px solid #50FF50;
+        }
+        #info {
+            margin-top: 20px;
+            font-size: 12px;
+        }
+        #commands {
+            margin-top: 10px;
+            max-width: 800px;
+            text-align: left;
+        }
+        .key {
+            color: #FFFF50;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <canvas id="game"></canvas>
+        <div id="info">
+            <div>Press <span class="key">#</span> to select first frame | <span class="key">f</span> to create frame | <span class="key">m</span> to toggle animation</div>
+            <div id="commands">
+                <strong>Commands:</strong>
+                f/F - frame/reframe | d - duplicate | s/S - scale frames/structure |
+                e/E - reflect h/v | r/R - rotate 90°/45° | x - delete | z/Z - snap cursor
+            </div>
+        </div>
+    </div>
+    <script type="module">
+        import { FrameworksApp } from './app.js';
+
+        // Initialize the app
+        window.app = new FrameworksApp('game');
+
+        console.log('Frameworks initialized');
+        console.log('Export commands:', window.app.exportCommands());
+    </script>
+</body>
+</html>
