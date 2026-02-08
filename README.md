@@ -220,6 +220,57 @@ The custom GLSL vertex shader (`src/renderer-instanced.js`) handles:
 - ✅ Duplicate with d/D (both keys)
 - ✅ Context system architecture documented
 
+## On-Chain Deployment
+
+### FrameworksRendererV3 (Sepolia Testnet)
+
+**Contract Address**: `0x6970B8b97AD1247F4e5Fb34a4E1b5c58Cac1BCed`
+
+The FrameworksRendererV3 contract enables fully on-chain generative art using the Frameworks command system. All code executes from Ethereum storage via ETHFS.
+
+#### Dependencies
+- **Three.js**: `three-v0.147.0.min.js.gz` (ETHFS)
+- **Frameworks Library**: `frameworks-v3.1-instanced.min.js` (ETHFS)
+- **ETHFS FileStore**: `0x8FAA1AAb9DA8c75917C43Fb24fDdb513edDC3245`
+- **ArtifactReader Library**: `0x4722F16408aF27378a782eda6cE88F46905e5227`
+
+#### Usage
+
+To mint a Frameworks artwork, encode your artifact data as:
+```solidity
+abi.encode(imageDataURI, commandString)
+```
+
+**Parameters**:
+- `imageDataURI`: Static preview image (PNG data URI or IPFS link)
+- `commandString`: Frameworks commands (e.g., `"ftil(dR,8)"`)
+
+**Example commands**:
+- `"f"` - Single frame
+- `"ftd"` - Frame, translate, duplicate
+- `"ftil(dR,8)"` - Frame, tile, duplicate and rotate 8 times
+- `"fp5fpp2fppp"` - Create frames in multiple views with color cycling
+
+The renderer automatically:
+1. Loads Three.js and Frameworks from ETHFS
+2. Initializes the 3D environment
+3. Executes your command string
+4. Returns both static image and interactive animation URL
+
+#### Command Notation
+
+Commands support repeat notation for compactness:
+- `(command,count)` - Repeat command count times
+- Example: `(dR,8)` = `dRdRdRdRdRdRdRdR`
+
+#### Deployment Script
+
+```bash
+npx hardhat run scripts/deploy-frameworks-renderer-v3.js --network sepolia
+```
+
+See `contracts/FrameworksRendererV3.sol` for implementation details.
+
 ## Future Enhancements
 
 - [ ] Color palette context (p + ijkl navigation)
@@ -227,10 +278,11 @@ The custom GLSL vertex shader (`src/renderer-instanced.js`) handles:
 - [ ] Component frames (nested content)
 - [ ] Content/writing context (w key)
 - [ ] Save/load functionality
-- [ ] Blockchain integration for command storage
+- [x] Blockchain integration for command storage (FrameworksRendererV3)
 - [ ] Animation system with IJKL continuous playback
 - [ ] Line thickness controls
 - [ ] Named selections
+- [ ] Interactive on-chain rendering (keyboard controls in minted tokens)
 
 ## License
 

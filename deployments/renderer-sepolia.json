@@ -1,0 +1,12 @@
+{
+  "network": "sepolia",
+  "chainId": 11155111,
+  "contractAddress": "0xEF5Ec04d049A9a5a27155c81395cf8FEC179938e",
+  "artifactReaderLibrary": "0xDc2156a352f720B2673E4B7e929d14Da1D646347",
+  "deployer": "0x8c76A394D736422CD0590d57f165b05E4e117835",
+  "transactionHash": "0xf39591ed8bd0d8f5cc5cb2ca8fec122fa33f6804ae67a134ac40cd600e8ebe1a",
+  "blockNumber": null,
+  "timestamp": "2026-01-28T04:29:28.124Z",
+  "name": "Frameworks V3",
+  "version": "1"
+}

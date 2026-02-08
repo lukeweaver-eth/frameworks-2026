@@ -1,0 +1,12 @@
+{
+  "network": "sepolia",
+  "chainId": 11155111,
+  "contractAddress": "0xBD9d2478A7a16B25023494b16356F21FD3452d82",
+  "artifactReaderLibrary": "0x4722F16408aF27378a782eda6cE88F46905e5227",
+  "deployer": "0x8c76A394D736422CD0590d57f165b05E4e117835",
+  "transactionHash": "0xdec54ec785fbcdc3e7959d028b472526dacf323ab26139ca6b6e5583fcd5cdbe",
+  "blockNumber": null,
+  "timestamp": "2026-01-30T05:23:03.617Z",
+  "name": "Three.js Renderer",
+  "version": "1"
+}
