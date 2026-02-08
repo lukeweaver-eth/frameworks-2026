@@ -225,14 +225,41 @@ The custom GLSL vertex shader (`src/renderer-instanced.js`) handles:
 ### FrameworksRendererV3 (Sepolia Testnet)
 
 **Contract Address**: `0x6970B8b97AD1247F4e5Fb34a4E1b5c58Cac1BCed`
+**Type**: Monolithic (single combined file)
 
 The FrameworksRendererV3 contract enables fully on-chain generative art using the Frameworks command system. All code executes from Ethereum storage via ETHFS.
 
 #### Dependencies
 - **Three.js**: `three-v0.147.0.min.js.gz` (ETHFS)
-- **Frameworks Library**: `frameworks-v3.1-instanced.min.js` (ETHFS)
+- **Frameworks Library**: `frameworks-v3.1-instanced.min.js` (ETHFS, 47 KB monolithic)
 - **ETHFS FileStore**: `0x8FAA1AAb9DA8c75917C43Fb24fDdb513edDC3245`
 - **ArtifactReader Library**: `0x4722F16408aF27378a782eda6cE88F46905e5227`
+
+### FrameworksRendererV3_1 (Sepolia Testnet) - **Latest**
+
+**Contract Address**: `0xfAa1F870212cF3d461fd5cC955901A7F14c32DFb`
+**Type**: Modular (8 separate components)
+**Version**: v3.1.0
+
+The V3.1 renderer uses a modular architecture for easier maintenance and updates. Each component is stored separately on ETHFS with semantic versioning.
+
+#### Modular Components (v3.1.0)
+1. `frameworks-v3.1.0-core.min.js` (4.5 KB) - Frame, Cursor, Framework classes
+2. `frameworks-v3.1.0-palette.min.js` (2.3 KB) - Color palette manager
+3. `frameworks-v3.1.0-context-color.min.js` (1.7 KB) - Color selection context
+4. `frameworks-v3.1.0-context-camera.min.js` (2.7 KB) - Camera controls
+5. `frameworks-v3.1.0-context-selection.min.js` (2.9 KB) - Frame selection
+6. `frameworks-v3.1.0-command-tree.min.js` (1.8 KB) - Command history navigation
+7. `frameworks-v3.1.0-commands.min.js` (16.6 KB) - Command executor
+8. `frameworks-v3.1.0-renderer-instanced.min.js` (13.2 KB) - GPU renderer
+
+**Total Size**: 45.7 KB (vs 47 KB monolithic)
+
+#### Benefits of Modular Architecture
+- **Easier Updates**: Individual modules can be updated without re-uploading entire library
+- **Better Caching**: Browser caches each module separately
+- **Clearer Dependencies**: Load order explicitly shows component relationships
+- **Future Flexibility**: Easy to add new contexts or swap implementations
 
 #### Usage
 
@@ -263,13 +290,26 @@ Commands support repeat notation for compactness:
 - `(command,count)` - Repeat command count times
 - Example: `(dR,8)` = `dRdRdRdRdRdRdRdR`
 
-#### Deployment Script
+#### Deployment Scripts
 
+**Monolithic V3**:
 ```bash
 npx hardhat run scripts/deploy-frameworks-renderer-v3.js --network sepolia
 ```
 
-See `contracts/FrameworksRendererV3.sol` for implementation details.
+**Modular V3.1** (recommended):
+```bash
+# 1. Build modular components
+npx hardhat run scripts/build-modular-ethfs.js
+
+# 2. Upload to ETHFS
+npx hardhat run scripts/upload-modular-ethfs.js --network sepolia
+
+# 3. Deploy renderer
+npx hardhat run scripts/deploy-frameworks-renderer-v3_1.js --network sepolia
+```
+
+See `contracts/FrameworksRendererV3.sol` and `contracts/FrameworksRendererV3_1.sol` for implementation details.
 
 ## Future Enhancements
 
