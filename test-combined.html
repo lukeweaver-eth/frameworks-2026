@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frameworks V3 - Combined Test</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: monospace;
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #0f0;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <strong>Frameworks V3 - Combined/Production Test</strong><br>
+        Testing minified build ready for ETHFS<br>
+        <span id="command-display"></span>
+    </div>
+    <div id="container"></div>
+
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r147/three.min.js"></script>
+
+    <!-- Combined Frameworks build -->
+    <script src="src/frameworks-v3.1.0-combined.min.js"></script>
+
+    <!-- Initialize -->
+    <script>
+        // Configuration (simulates on-chain config)
+        window.FRAMEWORKS_CONFIG = {
+            commandHistory: 'ftil(dR,8)',
+            isOnChain: false  // Set to true to test on-chain mode
+        };
+
+        // Initialize Frameworks
+        const framework = new Framework();
+        const paletteManager = new PaletteManager('eightyColors');
+        const renderer = new FrameworksInstancedRenderer(framework, 'container');
+        const colorContext = new ColorContext(framework, paletteManager);
+        const cameraContext = new CameraContext(framework, renderer);
+        const selectionContext = new FrameSelectionContext(framework);
+        const commandTree = new CommandTree();
+        const commandExecutor = new CommandExecutor(
+            framework,
+            paletteManager,
+            renderer,
+            commandTree,
+            colorContext,
+            cameraContext,
+            selectionContext
+        );
+
+        // Start rendering
+        renderer.start();
+
+        // Execute commands from config
+        if (window.FRAMEWORKS_CONFIG.commandHistory) {
+            commandExecutor.executeCommandString(window.FRAMEWORKS_CONFIG.commandHistory);
+        }
+
+        // Keyboard handler
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                return;
+            }
+
+            const key = e.key;
+            const isShift = e.shiftKey;
+            commandExecutor.executeKey(key, isShift);
+
+            // Update command display
+            document.getElementById('command-display').textContent =
+                'Commands: ' + commandTree.getCurrentCommandSequence().join('');
+        });
+
+        console.log('✅ Frameworks V3 combined build loaded successfully');
+        console.log('📦 This version matches what will be deployed on-chain');
+    </script>
+</body>
+</html>

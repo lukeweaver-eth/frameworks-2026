@@ -8,7 +8,35 @@ A spatial content structure tool for constructing compositions in 3D space using
 
 ## Quick Start
 
-Open `index-instanced.html` in a web browser to launch the application.
+### Development
+```bash
+# Edit individual modules in src/
+# Test with modular loading
+open test-modular.html
+
+# Build combined version
+node scripts/build-combined.js
+
+# Test combined build
+open test-combined.html
+```
+
+### Production Deployment
+```bash
+# 1. Build
+node scripts/build-combined.js
+
+# 2. Upload to ETHFS
+npx hardhat run scripts/upload-combined-to-ethfs.js --network sepolia
+
+# 3. Deploy renderer (if needed)
+npx hardhat run scripts/deploy-renderer-quick.js --network sepolia
+
+# 4. Mint test token
+npx hardhat run scripts/mint-quick.js --network sepolia
+```
+
+See **[WORKFLOW.md](WORKFLOW.md)** for complete development workflow.
 
 ### Basic Usage
 
