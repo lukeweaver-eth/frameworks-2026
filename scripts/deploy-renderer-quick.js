@@ -1,9 +1,14 @@
 // deploy-renderer-quick.js
 // Quick deployment of FrameworksRendererV3 with combined file
 
+const fs = require('fs');
+const path = require('path');
 const hre = require('hardhat');
 
-const VERSION = 'v3.1.0';
+// Load version from version.json
+const versionPath = path.join(__dirname, '..', 'version.json');
+const versionData = JSON.parse(fs.readFileSync(versionPath, 'utf8'));
+const VERSION = versionData.current;
 const ETHFS_FILENAME = `frameworks-${VERSION}-combined.min.js`;
 
 async function main() {
@@ -45,20 +50,34 @@ async function main() {
   console.log('  Version:', version.toString());
   console.log();
 
+  // Update version.json with renderer address
+  const latestHistory = versionData.history[versionData.history.length - 1];
+  if (latestHistory && latestHistory.version === VERSION) {
+    latestHistory.renderer = renderer.address;
+    latestHistory.deployDate = new Date().toISOString().split('T')[0];
+    fs.writeFileSync(versionPath, JSON.stringify(versionData, null, 2));
+  }
+
   console.log('='.repeat(60));
   console.log('DEPLOYMENT COMPLETE');
   console.log('='.repeat(60));
   console.log();
+  console.log('Version:', VERSION);
   console.log('Contract Address:', renderer.address);
   console.log('ETHFS File:', ETHFS_FILENAME);
   console.log();
-  console.log('⚠️  IMPORTANT: Update contract to use this filename!');
-  console.log(`   Change line 114 in FrameworksRendererV3.sol to:`);
+  console.log('⚠️  IMPORTANT: Contract uses hardcoded filename!');
+  console.log(`   Current: bodyTags[3].name = "frameworks-v3.1.0-combined.min.js"`);
+  console.log(`   Update FrameworksRendererV3.sol line 114 to:`);
   console.log(`   bodyTags[3].name = "${ETHFS_FILENAME}";`);
   console.log();
+  console.log('✅ Version history updated with renderer address');
+  console.log();
   console.log('Next steps:');
-  console.log('1. Register renderer in Mint protocol (if needed)');
-  console.log('2. Mint test token: npx hardhat run scripts/mint-quick.js --network sepolia');
+  console.log('1. Recompile and redeploy if filename changed');
+  console.log('2. Register renderer with Mint contract owner');
+  console.log('3. Update RENDERER_INDEX in scripts/mint-quick.js');
+  console.log('4. Mint test token');
   console.log();
 }
 

@@ -1,0 +1,12 @@
+{
+  "current": "3.1.1",
+  "history": [
+    {
+      "version": "3.1.0",
+      "ethfsFile": "frameworks-v3.1-instanced.min.js",
+      "renderer": "0x6970B8b97AD1247F4e5Fb34a4E1b5c58Cac1BCed",
+      "date": "2026-02-09",
+      "notes": "Initial V3 deployment"
+    }
+  ]
+}
