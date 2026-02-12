@@ -16,6 +16,15 @@ contract FrameworksRendererV3 is IRenderer {
     address constant private scriptyBuilder   = 0xD7587F110E08F4D120A231bA97d3B577A81Df022;
     address constant private scriptyStorage   = 0xbD11994aABB55Da86DC246EBB17C1Be0af5b7699;
 
+    /// @notice ETHFS filename for the Frameworks library
+    string public ethfsFilename;
+
+    /// @notice Deploy renderer with specific Frameworks version
+    /// @param _ethfsFilename The filename on ETHFS (e.g., "frameworks-3.1.2-combined.min.js")
+    constructor(string memory _ethfsFilename) {
+        ethfsFilename = _ethfsFilename;
+    }
+
     /// @notice Expose the name of this renderer for easy registration in UIs.
     function name () external pure returns (string memory) {
         return "Frameworks V3 Renderer";
@@ -111,7 +120,7 @@ contract FrameworksRendererV3 is IRenderer {
         bodyTags[2].tagType = HTMLTagType.script;
 
         // Load Frameworks V3 library from ETHFS
-        bodyTags[3].name = "frameworks-v3.1-instanced.min.js";
+        bodyTags[3].name = ethfsFilename;
         bodyTags[3].tagType = HTMLTagType.scriptBase64DataURI;
         bodyTags[3].contractAddress = ethfsFileStorage;
 
@@ -137,6 +146,12 @@ contract FrameworksRendererV3 is IRenderer {
                     "if(window.FRAMEWORKS_CONFIG.commandHistory){",
                         "commandExecutor.executeCommandString(window.FRAMEWORKS_CONFIG.commandHistory);",
                     "}",
+                    "document.addEventListener('keydown',(e)=>{",
+                        "if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'){return;}",
+                        "const key=e.key;",
+                        "const isShift=e.shiftKey;",
+                        "commandExecutor.executeKey(key,isShift);",
+                    "});",
                 "});"
             ))
         );
