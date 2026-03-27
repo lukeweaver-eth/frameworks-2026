@@ -1,0 +1,9 @@
+.DS_Store
+.env
+.obsidian/
+node_modules/
+WebGPU/deploy/node_modules/
+WebGPU/deploy/cache/
+WebGPU/deploy/broadcast/
+WebGPU/deploy/out/
+WebGPU/deploy/lib/

@@ -1,0 +1,21 @@
+[profile.default]
+src = "src"
+script = "script"
+out = "out"
+libs = ["lib"]
+solc = "0.8.24"
+
+remappings = [
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+  "scripty.sol/=lib/scripty.sol/",
+  "forge-std/=lib/forge-std/src/",
+  "solady/=lib/solady/",
+]
+
+[rpc_endpoints]
+mainnet = "${ETH_RPC_MAINNET}"
+sepolia = "${ETH_RPC_SEPOLIA}"
+
+[etherscan]
+mainnet = { key = "${ETHERSCAN_API_KEY}" }
+sepolia = { key = "${ETHERSCAN_API_KEY}", url = "https://api-sepolia.etherscan.io/api" }

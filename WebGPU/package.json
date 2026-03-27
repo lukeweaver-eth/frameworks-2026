@@ -1,0 +1,17 @@
+{
+  "name": "frameworks-v4-deploy",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Deployment scripts for Frameworks V4 renderer on Mint protocol",
+  "scripts": {
+    "upload": "node script/upload-to-ethfs.mjs",
+    "register": "node script/register-renderer.mjs",
+    "minify": "npx terser viewer/frameworks-v4-viewer.js -o viewer/frameworks_v4_viewer.min.js --compress --mangle && gzip -9 -k -f viewer/frameworks_v4_viewer.min.js"
+  },
+  "dependencies": {
+    "ethers": "^6.13.0"
+  },
+  "devDependencies": {
+    "terser": "^5.31.0"
+  }
+}

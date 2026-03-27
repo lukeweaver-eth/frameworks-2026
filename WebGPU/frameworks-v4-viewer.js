@@ -1,0 +1,1338 @@
+// ============================================================
+// FRAMEWORKS V4 — VIEWER-ONLY BUILD
+// For on-chain rendering via EthFS + ScriptyBuilder
+//
+// This file is the viewer-mode version of frameworks-v4.html.
+// It expects `autoExecuteCommand` to be set as a global before
+// this script loads. It creates its own DOM, executes the command
+// string, and renders in clean viewer mode with auto-orbit.
+//
+// Upload this (minified + gzipped) to EthFS as:
+//   "frameworks_v4_viewer.min.js.gz"
+// ============================================================
+
+// ============================================================
+// VIEWER DOM SETUP — create elements before anything else
+// ============================================================
+(function setupViewerDOM() {
+  // Only set up DOM if we're in viewer mode (no existing canvas)
+  if (document.getElementById('canvas')) return;
+
+  const s = document.body.style;
+  s.margin = '0'; s.padding = '0'; s.overflow = 'hidden';
+  s.background = '#0a0a0c'; s.fontFamily = "'SF Mono','Fira Code',monospace";
+
+  // Canvas
+  const c = document.createElement('canvas');
+  c.id = 'canvas';
+  c.style.cssText = 'display:block;width:100vw;height:100vh';
+  document.body.appendChild(c);
+
+  // Error message
+  const e = document.createElement('div');
+  e.id = 'error-msg';
+  e.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:#ff6666;font-size:16px;text-align:center;display:none';
+  document.body.appendChild(e);
+
+  // Stub elements that contexts may reference during command execution
+  const stubs = ['command-bar','mode-text','view-text','cursor-text','selection-text',
+                 'fps-text','draw-text','hud','palette-overlay','palette-grid',
+                 'bracket-overlay','bracket-input','command-input','context-text',
+                 'info-display','perf-display','mode-display'];
+  const container = document.createElement('div');
+  container.style.display = 'none';
+  stubs.forEach(id => {
+    const el = document.createElement('div');
+    el.id = id;
+    if (id === 'bracket-input' || id === 'command-input') {
+      const inp = document.createElement('input');
+      inp.id = id;
+      container.appendChild(inp);
+    } else {
+      container.appendChild(el);
+    }
+  });
+  document.body.appendChild(container);
+})();
+
+// ============================================================
+// FRAME STORE — Typed array backend
+// 64-byte per-instance layout
+// ============================================================
+
+const FLOATS_PER_INSTANCE = 16;
+const BYTES_PER_INSTANCE = 64;
+
+const F = {
+    PX: 0,  PY: 1,  PZ: 2,  SCALE: 3,
+    RX: 4,  RY: 5,  RZ: 6,
+    UX: 8,  UY: 9,  UZ: 10,
+    NX: 12, NY: 13, NZ: 14,
+};
+
+const U = {
+    COLOR_INDEX: 7,
+    FLAGS: 11,
+    FRAME_ID: 15,
+};
+
+const FLAG_SELECTED = 1;
+const FLAG_VISIBLE  = 2;
+
+class FrameStore {
+    constructor(initialCapacity = 4096) {
+        this.count = 0;
+        this.capacity = initialCapacity;
+        this._frameIdCounter = 0;
+        this.data = new ArrayBuffer(this.capacity * BYTES_PER_INSTANCE);
+        this.f32 = new Float32Array(this.data);
+        this.u32 = new Uint32Array(this.data);
+        this.metadata = [];
+        this._dirtyMin = Infinity;
+        this._dirtyMax = 0;
+        this._fullDirty = false;
+    }
+
+    _grow(needed) {
+        while (this.capacity < needed) this.capacity *= 2;
+        if (this.capacity > this.f32.length / FLOATS_PER_INSTANCE) {
+            const oldBytes = this.data.byteLength;
+            const newBuf = new ArrayBuffer(this.capacity * BYTES_PER_INSTANCE);
+            new Uint8Array(newBuf).set(new Uint8Array(this.data, 0, oldBytes));
+            this.data = newBuf;
+            this.f32 = new Float32Array(this.data);
+            this.u32 = new Uint32Array(this.data);
+            this._fullDirty = true;
+        }
+    }
+
+    _o(i) { return i * FLOATS_PER_INSTANCE; }
+    _b(i) { return i * BYTES_PER_INSTANCE; }
+
+    _markDirty(instanceIndex) {
+        const lo = this._b(instanceIndex);
+        const hi = lo + BYTES_PER_INSTANCE;
+        if (lo < this._dirtyMin) this._dirtyMin = lo;
+        if (hi > this._dirtyMax) this._dirtyMax = hi;
+    }
+
+    _markRangeDirty(startIdx, count) {
+        const lo = this._b(startIdx);
+        const hi = this._b(startIdx + count);
+        if (lo < this._dirtyMin) this._dirtyMin = lo;
+        if (hi > this._dirtyMax) this._dirtyMax = hi;
+    }
+
+    _markAllDirty() { this._fullDirty = true; }
+
+    getDirtyRange() {
+        if (this._fullDirty) return { offset: 0, length: this.count * BYTES_PER_INSTANCE };
+        if (this._dirtyMin < this._dirtyMax) return { offset: this._dirtyMin, length: this._dirtyMax - this._dirtyMin };
+        return null;
+    }
+
+    clearDirty() {
+        this._dirtyMin = Infinity;
+        this._dirtyMax = 0;
+        this._fullDirty = false;
+    }
+
+    static basisFromNormal(nx, ny, nz) {
+        const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+        if (len > 0.0001) { nx /= len; ny /= len; nz /= len; }
+        if (Math.abs(nx) < 0.001 && Math.abs(ny) < 0.001 && Math.abs(nz - 1) < 0.001) {
+            return { rx: 1, ry: 0, rz: 0, ux: 0, uy: 1, uz: 0 };
+        }
+        let refX, refY, refZ;
+        const dotWithY = Math.abs(ny);
+        if (dotWithY > 0.999) { refX = 1; refY = 0; refZ = 0; }
+        else { refX = 0; refY = 1; refZ = 0; }
+        let rx = refY * nz - refZ * ny;
+        let ry = refZ * nx - refX * nz;
+        let rz = refX * ny - refY * nx;
+        const rLen = Math.sqrt(rx * rx + ry * ry + rz * rz);
+        if (rLen > 0.0001) { rx /= rLen; ry /= rLen; rz /= rLen; }
+        let ux = ny * rz - nz * ry;
+        let uy = nz * rx - nx * rz;
+        let uz = nx * ry - ny * rx;
+        const uLen = Math.sqrt(ux * ux + uy * uy + uz * uz);
+        if (uLen > 0.0001) { ux /= uLen; uy /= uLen; uz /= uLen; }
+        return { rx, ry, rz, ux, uy, uz };
+    }
+
+    addFrame(x, y, z, nx, ny, nz, scale, colorIndex) {
+        const i = this.count++;
+        this._grow(this.count);
+        const o = this._o(i);
+        this.f32[o + F.PX] = x;
+        this.f32[o + F.PY] = y;
+        this.f32[o + F.PZ] = z;
+        this.f32[o + F.SCALE] = scale ?? 1;
+        const basis = FrameStore.basisFromNormal(nx, ny, nz);
+        this.f32[o + F.RX] = basis.rx; this.f32[o + F.RY] = basis.ry; this.f32[o + F.RZ] = basis.rz;
+        this.f32[o + F.UX] = basis.ux; this.f32[o + F.UY] = basis.uy; this.f32[o + F.UZ] = basis.uz;
+        const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+        this.f32[o + F.NX] = len > 0.0001 ? nx / len : 0;
+        this.f32[o + F.NY] = len > 0.0001 ? ny / len : 0;
+        this.f32[o + F.NZ] = len > 0.0001 ? nz / len : 1;
+        this.u32[o + U.COLOR_INDEX] = colorIndex ?? 0;
+        this.u32[o + U.FLAGS] = FLAG_SELECTED | FLAG_VISIBLE;
+        this.u32[o + U.FRAME_ID] = this._frameIdCounter++;
+        this.metadata[i] = { called: '', contents: '', contexts: [], components: [] };
+        this._markDirty(i);
+        return i;
+    }
+
+    clear() { this.count = 0; this._frameIdCounter = 0; this.metadata = []; this._markAllDirty(); }
+    deselectAll() { for (let i = 0; i < this.count; i++) { this.u32[this._o(i) + U.FLAGS] &= ~FLAG_SELECTED; } this._markRangeDirty(0, this.count); }
+    selectAll() { for (let i = 0; i < this.count; i++) { this.u32[this._o(i) + U.FLAGS] |= FLAG_SELECTED; } this._markRangeDirty(0, this.count); }
+    getSelectedCount() { let n = 0; for (let i = 0; i < this.count; i++) { if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) n++; } return n; }
+    getFrameId(i) { return this.u32[this._o(i) + U.FRAME_ID]; }
+    isSelected(i) { return !!(this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED); }
+
+    setSelected(i, selected) {
+        if (selected) this.u32[this._o(i) + U.FLAGS] |= FLAG_SELECTED;
+        else this.u32[this._o(i) + U.FLAGS] &= ~FLAG_SELECTED;
+        this._markDirty(i);
+    }
+
+    getColorIndex(i) { return this.u32[this._o(i) + U.COLOR_INDEX]; }
+    setColorIndex(i, colorIndex) { this.u32[this._o(i) + U.COLOR_INDEX] = colorIndex; this._markDirty(i); }
+
+    shiftSelectedColors(shift, paletteSize = 80) {
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) {
+                const oldIdx = this.u32[this._o(i) + U.COLOR_INDEX];
+                let newIdx = (oldIdx + shift) % paletteSize;
+                if (newIdx < 0) newIdx += paletteSize;
+                this.u32[this._o(i) + U.COLOR_INDEX] = newIdx;
+                this._markDirty(i);
+            }
+        }
+    }
+
+    animateAllColors(step, cols = 8, paletteSize = 80) {
+        for (let i = 0; i < this.count; i++) {
+            const o = this._o(i) + U.COLOR_INDEX;
+            this.u32[o] = (this.u32[o] + step + paletteSize) % paletteSize;
+            this._markDirty(i);
+        }
+    }
+
+    translate(i, dx, dy, dz) {
+        const o = this._o(i);
+        this.f32[o + F.PX] += dx; this.f32[o + F.PY] += dy; this.f32[o + F.PZ] += dz;
+        this._markDirty(i);
+    }
+
+    translateSelected(dx, dy, dz) {
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) this.translate(i, dx, dy, dz);
+        }
+    }
+
+    rotateFrame(i, cx, cy, cz, angle, axis) {
+        const o = this._o(i);
+        const cos = Math.cos(angle), sin = Math.sin(angle);
+        const dx = this.f32[o + F.PX] - cx, dy = this.f32[o + F.PY] - cy, dz = this.f32[o + F.PZ] - cz;
+        let px, py, pz;
+        switch (axis) {
+            case 'x': px = dx; py = dy*cos - dz*sin; pz = dy*sin + dz*cos; break;
+            case 'y': px = dx*cos + dz*sin; py = dy; pz = -dx*sin + dz*cos; break;
+            case 'z': px = dx*cos - dy*sin; py = dx*sin + dy*cos; pz = dz; break;
+        }
+        this.f32[o + F.PX] = cx + px; this.f32[o + F.PY] = cy + py; this.f32[o + F.PZ] = cz + pz;
+        const rx = this.f32[o + F.RX], ry = this.f32[o + F.RY], rz = this.f32[o + F.RZ];
+        switch (axis) {
+            case 'x': this.f32[o+F.RX]=rx; this.f32[o+F.RY]=ry*cos-rz*sin; this.f32[o+F.RZ]=ry*sin+rz*cos; break;
+            case 'y': this.f32[o+F.RX]=rx*cos+rz*sin; this.f32[o+F.RY]=ry; this.f32[o+F.RZ]=-rx*sin+rz*cos; break;
+            case 'z': this.f32[o+F.RX]=rx*cos-ry*sin; this.f32[o+F.RY]=rx*sin+ry*cos; this.f32[o+F.RZ]=rz; break;
+        }
+        const ux = this.f32[o + F.UX], uy = this.f32[o + F.UY], uz = this.f32[o + F.UZ];
+        switch (axis) {
+            case 'x': this.f32[o+F.UX]=ux; this.f32[o+F.UY]=uy*cos-uz*sin; this.f32[o+F.UZ]=uy*sin+uz*cos; break;
+            case 'y': this.f32[o+F.UX]=ux*cos+uz*sin; this.f32[o+F.UY]=uy; this.f32[o+F.UZ]=-ux*sin+uz*cos; break;
+            case 'z': this.f32[o+F.UX]=ux*cos-uy*sin; this.f32[o+F.UY]=ux*sin+uy*cos; this.f32[o+F.UZ]=uz; break;
+        }
+        const nx = this.f32[o + F.NX], ny = this.f32[o + F.NY], nz = this.f32[o + F.NZ];
+        switch (axis) {
+            case 'x': this.f32[o+F.NX]=nx; this.f32[o+F.NY]=ny*cos-nz*sin; this.f32[o+F.NZ]=ny*sin+nz*cos; break;
+            case 'y': this.f32[o+F.NX]=nx*cos+nz*sin; this.f32[o+F.NY]=ny; this.f32[o+F.NZ]=-nx*sin+nz*cos; break;
+            case 'z': this.f32[o+F.NX]=nx*cos-ny*sin; this.f32[o+F.NY]=nx*sin+ny*cos; this.f32[o+F.NZ]=nz; break;
+        }
+        this._normalizeVec3At(o + F.RX);
+        this._normalizeVec3At(o + F.UX);
+        this._normalizeVec3At(o + F.NX);
+        this._markDirty(i);
+    }
+
+    _normalizeVec3At(offset) {
+        const x = this.f32[offset], y = this.f32[offset+1], z = this.f32[offset+2];
+        const len = Math.sqrt(x*x + y*y + z*z);
+        if (len > 0.0001) { this.f32[offset] = x/len; this.f32[offset+1] = y/len; this.f32[offset+2] = z/len; }
+    }
+
+    rotateSelected(cx, cy, cz, angle, view) {
+        let axis;
+        switch (view) {
+            case 0: case 1: case 3: axis = 'z'; break;
+            case 2: case 4: axis = 'x'; break;
+            case 5: case 6: axis = 'y'; break;
+            default: axis = 'z';
+        }
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) this.rotateFrame(i, cx, cy, cz, angle, axis);
+        }
+    }
+
+    reflectSelectedH(cx, cy, cz, view) {
+        let reflectAxis;
+        switch (view) {
+            case 0: case 1: case 3: case 5: case 6: reflectAxis = 'x'; break;
+            case 2: case 4: reflectAxis = 'z'; break;
+            default: reflectAxis = 'x';
+        }
+        for (let i = 0; i < this.count; i++) {
+            if (!(this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED)) continue;
+            const o = this._o(i);
+            switch (reflectAxis) {
+                case 'x': { const d = this.f32[o + F.PX] - cx; this.f32[o + F.PX] = cx - d; this.f32[o + F.NX] = -this.f32[o + F.NX]; break; }
+                case 'z': { const d = this.f32[o + F.PZ] - cz; this.f32[o + F.PZ] = cz - d; this.f32[o + F.NZ] = -this.f32[o + F.NZ]; break; }
+            }
+            this._markDirty(i);
+        }
+    }
+
+    reflectSelectedV(cx, cy, cz, view) {
+        let reflectAxis;
+        switch (view) {
+            case 0: case 1: case 2: case 3: case 4: reflectAxis = 'y'; break;
+            case 5: case 6: reflectAxis = 'z'; break;
+            default: reflectAxis = 'y';
+        }
+        for (let i = 0; i < this.count; i++) {
+            if (!(this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED)) continue;
+            const o = this._o(i);
+            switch (reflectAxis) {
+                case 'y': { const d = this.f32[o + F.PY] - cy; this.f32[o + F.PY] = cy - d; this.f32[o + F.NY] = -this.f32[o + F.NY]; break; }
+                case 'z': { const d = this.f32[o + F.PZ] - cz; this.f32[o + F.PZ] = cz - d; this.f32[o + F.NZ] = -this.f32[o + F.NZ]; break; }
+            }
+            this._markDirty(i);
+        }
+    }
+
+    scaleSelected(factor) {
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) { this.f32[this._o(i) + F.SCALE] *= factor; this._markDirty(i); }
+        }
+    }
+
+    scaleSelectionGroup(factor) {
+        let cx = 0, cy = 0, cz = 0, n = 0;
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) {
+                const o = this._o(i); cx += this.f32[o]; cy += this.f32[o+1]; cz += this.f32[o+2]; n++;
+            }
+        }
+        if (n === 0) return;
+        cx /= n; cy /= n; cz /= n;
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) {
+                const o = this._o(i);
+                this.f32[o + F.PX] = cx + (this.f32[o + F.PX] - cx) * factor;
+                this.f32[o + F.PY] = cy + (this.f32[o + F.PY] - cy) * factor;
+                this.f32[o + F.PZ] = cz + (this.f32[o + F.PZ] - cz) * factor;
+                this.f32[o + F.SCALE] *= factor;
+                this._markDirty(i);
+            }
+        }
+    }
+
+    duplicateSelected() {
+        const originals = [];
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) originals.push(i);
+        }
+        if (originals.length === 0) return [];
+        for (const idx of originals) { this.u32[this._o(idx) + U.FLAGS] &= ~FLAG_SELECTED; this._markDirty(idx); }
+        const newIndices = [];
+        for (const srcIdx of originals) {
+            const newIdx = this.count++;
+            this._grow(this.count);
+            const src = this._o(srcIdx), dst = this._o(newIdx);
+            for (let j = 0; j < FLOATS_PER_INSTANCE; j++) this.u32[dst + j] = this.u32[src + j];
+            this.u32[dst + U.FRAME_ID] = this._frameIdCounter++;
+            this.u32[dst + U.FLAGS] |= FLAG_SELECTED;
+            const srcMeta = this.metadata[srcIdx];
+            this.metadata[newIdx] = { called: srcMeta ? srcMeta.called : '', contents: srcMeta ? srcMeta.contents : '', contexts: [], components: [] };
+            this._markDirty(newIdx);
+            newIndices.push(newIdx);
+        }
+        return newIndices;
+    }
+
+    deleteSelected() {
+        let dst = 0;
+        for (let src = 0; src < this.count; src++) {
+            if (this.u32[this._o(src) + U.FLAGS] & FLAG_SELECTED) continue;
+            if (dst !== src) {
+                const so = this._o(src), do_ = this._o(dst);
+                for (let j = 0; j < FLOATS_PER_INSTANCE; j++) this.u32[do_ + j] = this.u32[so + j];
+                this.metadata[dst] = this.metadata[src];
+            }
+            dst++;
+        }
+        const deleted = this.count - dst;
+        this.count = dst;
+        if (deleted > 0) this._markAllDirty();
+        return deleted;
+    }
+
+    snapSelectionToCursor(cursorX, cursorY, cursorZ) {
+        let cx = 0, cy = 0, cz = 0, n = 0;
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) {
+                const o = this._o(i); cx += this.f32[o]; cy += this.f32[o+1]; cz += this.f32[o+2]; n++;
+            }
+        }
+        if (n === 0) return;
+        cx /= n; cy /= n; cz /= n;
+        this.translateSelected(cursorX - cx, cursorY - cy, cursorZ - cz);
+    }
+
+    centerStructureToCursor(cursorX, cursorY, cursorZ) {
+        if (this.count === 0) return;
+        const bbox = this.getBoundingBox();
+        const dx = cursorX - bbox.centerX, dy = cursorY - bbox.centerY, dz = cursorZ - bbox.centerZ;
+        for (let i = 0; i < this.count; i++) this.translate(i, dx, dy, dz);
+    }
+
+    getBoundingBox() {
+        if (this.count === 0) return { minX:0, maxX:0, minY:0, maxY:0, minZ:0, maxZ:0, centerX:0, centerY:0, centerZ:0 };
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+        for (let i = 0; i < this.count; i++) {
+            const o = this._o(i);
+            const hs = this.f32[o + F.SCALE] / 2;
+            const x = this.f32[o], y = this.f32[o+1], z = this.f32[o+2];
+            if (x - hs < minX) minX = x - hs; if (x + hs > maxX) maxX = x + hs;
+            if (y - hs < minY) minY = y - hs; if (y + hs > maxY) maxY = y + hs;
+            if (z - hs < minZ) minZ = z - hs; if (z + hs > maxZ) maxZ = z + hs;
+        }
+        return { minX, maxX, minY, maxY, minZ, maxZ,
+            centerX: (minX+maxX)/2, centerY: (minY+maxY)/2, centerZ: (minZ+maxZ)/2 };
+    }
+
+    selectAllOfColor() {
+        let targetColor = null;
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) { targetColor = this.u32[this._o(i) + U.COLOR_INDEX]; break; }
+        }
+        if (targetColor === null) return;
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.COLOR_INDEX] === targetColor) this.u32[this._o(i) + U.FLAGS] |= FLAG_SELECTED;
+        }
+        this._markRangeDirty(0, this.count);
+    }
+}
+
+// ============================================================
+// PALETTE MANAGER
+// ============================================================
+class PaletteManager {
+    constructor() { this.currentIndex = 0; }
+    getCurrentIndex() { return this.currentIndex; }
+    getNextColor() { this.currentIndex = (this.currentIndex + 1) % 80; return this.currentIndex; }
+    reset() { this.currentIndex = 0; }
+}
+
+// ============================================================
+// CONTEXT SYSTEMS (needed for command string replay)
+// ============================================================
+class ColorContext {
+    constructor(store, palette) { this.store = store; this.palette = palette; this.active = false; this.currentIndex = 0; this.startingIndex = 0; this.rows = 8; this.cols = 10; }
+    enter() { this.active = true; this.currentIndex = this.palette.getCurrentIndex(); this.startingIndex = this.currentIndex; try { document.getElementById('palette-overlay').classList.add('active'); } catch(e) {} this.updateUI(); }
+    exit() { this.active = false; try { document.getElementById('palette-overlay').classList.remove('active'); } catch(e) {} }
+    navigate(key) {
+        switch (key) {
+            case 'i': this.currentIndex = (this.currentIndex - this.cols + 80) % 80; break;
+            case 'k': this.currentIndex = (this.currentIndex + this.cols) % 80; break;
+            case 'j': this.currentIndex = (this.currentIndex - 1 + 80) % 80; break;
+            case 'l': this.currentIndex = (this.currentIndex + 1) % 80; break;
+        }
+        this.updateUI();
+    }
+    apply() { const shift = this.currentIndex - this.startingIndex; this.store.shiftSelectedColors(shift, 80); this.palette.currentIndex = this.currentIndex; }
+    updateUI() { try { const cells = document.querySelectorAll('.palette-cell'); cells.forEach((cell, i) => { cell.classList.toggle('current', i === this.currentIndex); }); } catch(e) {} }
+}
+
+class CameraContext {
+    constructor(camera) {
+        this.camera = camera; this.active = false; this.currentView = 0;
+        this.orthographic = false; this.autoOrbit = false; this.autoOrbitPaused = false;
+        this.orbitVelocityTheta = 0; this.orbitVelocityPhi = 0;
+        this.orbitTheta = 0; this.orbitPhi = Math.PI / 4;
+        this.zoomLevel = 30; this.fov = Math.PI / 4;
+    }
+    enter() { this.active = true; }
+    exit() { this.active = false; }
+    selectView(num) {
+        this.currentView = num;
+        const cam = this.camera, zoom = cam.dist;
+        switch(num) {
+            case 0:
+                if (this.autoOrbit) { this.autoOrbitPaused = !this.autoOrbitPaused; }
+                else { this.autoOrbit = true; this.autoOrbitPaused = true; this.orbitTheta = cam.theta; this.orbitPhi = cam.phi; this.orbitVelocityTheta = 0; this.orbitVelocityPhi = 0; }
+                break;
+            case 1: this.autoOrbit=false; cam.theta=0; cam.phi=0; cam.dist=zoom; cam.invalidate(); break;
+            case 2: this.autoOrbit=false; cam.theta=Math.PI/2; cam.phi=0; cam.dist=zoom; cam.invalidate(); break;
+            case 3: this.autoOrbit=false; cam.theta=Math.PI; cam.phi=0; cam.dist=zoom; cam.invalidate(); break;
+            case 4: this.autoOrbit=false; cam.theta=-Math.PI/2; cam.phi=0; cam.dist=zoom; cam.invalidate(); break;
+            case 5: this.autoOrbit=false; cam.theta=0; cam.phi=Math.PI/2-0.01; cam.dist=zoom; cam.invalidate(); break;
+            case 6: this.autoOrbit=false; cam.theta=0; cam.phi=-Math.PI/2+0.01; cam.dist=zoom; cam.invalidate(); break;
+            case 7: this.autoOrbit=false; cam.theta=Math.PI/4; cam.phi=Math.atan(1/Math.sqrt(2)); cam.dist=zoom; cam.invalidate(); break;
+            case 8: this.autoOrbit=true; this.orbitTheta=cam.theta; this.orbitPhi=cam.phi; this.orbitVelocityTheta=0; this.orbitVelocityPhi=0; break;
+        }
+    }
+    navigate(key, shift = false) {
+        const cam = this.camera;
+        if (this.autoOrbit) {
+            const step = 0.3;
+            switch(key) {
+                case 'l': this.orbitVelocityTheta += step; this.autoOrbitPaused = false; return true;
+                case 'j': this.orbitVelocityTheta -= step; this.autoOrbitPaused = false; return true;
+                case 'i': this.orbitVelocityPhi += step; this.autoOrbitPaused = false; return true;
+                case 'k': this.orbitVelocityPhi -= step; this.autoOrbitPaused = false; return true;
+            }
+            return false;
+        }
+        const DEG5  = 5  * Math.PI / 180;
+        const DEG10 = 10 * Math.PI / 180;
+        const FOV_MIN = 5  * Math.PI / 180;
+        const FOV_MAX = 170 * Math.PI / 180;
+        switch (key) {
+            case 'i': cam.dist *= 0.9;  cam.invalidate(); break;
+            case 'I': cam.dist *= 0.5;  cam.invalidate(); break;
+            case 'k': cam.dist *= 1.1;  cam.invalidate(); break;
+            case 'K': cam.dist *= 2.0;  cam.invalidate(); break;
+            case 'j': this.fov = Math.min(this.fov + DEG5,  FOV_MAX); break;
+            case 'J': this.fov = Math.min(this.fov + DEG10, FOV_MAX); break;
+            case 'l': this.fov = Math.max(this.fov - DEG5,  FOV_MIN); break;
+            case 'L': this.fov = Math.max(this.fov - DEG10, FOV_MIN); break;
+        }
+    }
+    updateAutoOrbit(deltaTime) {
+        if (!this.autoOrbit || this.autoOrbitPaused) return;
+        this.orbitTheta += this.orbitVelocityTheta * deltaTime;
+        this.orbitPhi += this.orbitVelocityPhi * deltaTime;
+        this.camera.theta = this.orbitTheta;
+        this.camera.phi = this.orbitPhi;
+        this.camera.invalidate();
+    }
+}
+
+class FrameSelectionContext {
+    constructor(store) { this.store = store; this.active = false; this.bracketInputActive = false; this.bracketInput = ''; }
+    enter() { this.active = true; }
+    exit() { this.active = false; this.closeBracketInput(); }
+    openBracketInput() { this.bracketInputActive = true; this.bracketInput = ''; try { document.getElementById('bracket-overlay').classList.add('active'); document.getElementById('bracket-input').value = ''; document.getElementById('bracket-input').focus(); } catch(e) {} }
+    closeBracketInput() { this.bracketInputActive = false; try { document.getElementById('bracket-overlay').classList.remove('active'); } catch(e) {} }
+    submitBracketInput(text) {
+        this.closeBracketInput();
+        if (!text) return;
+        this.store.deselectAll();
+        if (text.includes(':')) {
+            const parts = text.split(':');
+            const start = parseInt(parts[0]), end = parseInt(parts[1]);
+            if (!isNaN(start) && !isNaN(end)) {
+                for (let i = 0; i < this.store.count; i++) {
+                    const fid = this.store.getFrameId(i);
+                    if (fid >= start && fid <= end) this.store.setSelected(i, true);
+                }
+            }
+        } else {
+            const ids = text.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+            const idSet = new Set(ids);
+            for (let i = 0; i < this.store.count; i++) {
+                if (idSet.has(this.store.getFrameId(i))) this.store.setSelected(i, true);
+            }
+        }
+    }
+    expandUp() { let maxSel = -1; for (let i = 0; i < this.store.count; i++) { if (this.store.isSelected(i)) maxSel = i; } if (maxSel < this.store.count - 1) this.store.setSelected(maxSel + 1, true); }
+    expandDown() { let minSel = this.store.count; for (let i = 0; i < this.store.count; i++) { if (this.store.isSelected(i)) { minSel = i; break; } } if (minSel > 0) this.store.setSelected(minSel - 1, true); }
+    contractUpper() { let maxSel = -1; for (let i = 0; i < this.store.count; i++) { if (this.store.isSelected(i)) maxSel = i; } if (maxSel >= 0) this.store.setSelected(maxSel, false); }
+    contractLower() { for (let i = 0; i < this.store.count; i++) { if (this.store.isSelected(i)) { this.store.setSelected(i, false); break; } } }
+    shiftUp() { for (let i = this.store.count - 1; i >= 0; i--) { if (this.store.isSelected(i) && i < this.store.count - 1 && !this.store.isSelected(i + 1)) { this.store.setSelected(i, false); this.store.setSelected(i + 1, true); } } }
+    shiftDown() { for (let i = 0; i < this.store.count; i++) { if (this.store.isSelected(i) && i > 0 && !this.store.isSelected(i - 1)) { this.store.setSelected(i, false); this.store.setSelected(i - 1, true); } } }
+    selectAllSameColor() { this.store.selectAllOfColor(); }
+}
+
+class CommandTree {
+    constructor() { this.history = [[]]; this.branchIndex = 0; this.positionInBranch = 0; this.inCommandContext = false; }
+    addCommand(cmd) { if (this.inCommandContext) return; const b = this.history[this.branchIndex]; if (this.positionInBranch < b.length) { const nb = b.slice(0, this.positionInBranch); nb.push(cmd); this.history.push(nb); this.branchIndex = this.history.length - 1; this.positionInBranch = nb.length; } else { b.push(cmd); this.positionInBranch = b.length; } }
+    moveBack() { if (this.positionInBranch > 0) this.positionInBranch--; }
+    moveForward() { const b = this.history[this.branchIndex]; if (this.positionInBranch < b.length) this.positionInBranch++; }
+    moveUp() { if (this.branchIndex > 0) { this.branchIndex--; this.positionInBranch = Math.min(this.positionInBranch, this.history[this.branchIndex].length); } }
+    moveDown() { if (this.branchIndex < this.history.length - 1) { this.branchIndex++; this.positionInBranch = Math.min(this.positionInBranch, this.history[this.branchIndex].length); } }
+    peekNextCommand() { const b = this.history[this.branchIndex]; return this.positionInBranch < b.length ? b[this.positionInBranch] : null; }
+    getCurrentCommandSequence() { return this.history[this.branchIndex].slice(0, this.positionInBranch); }
+    enterCommandContext() { this.inCommandContext = true; }
+    exitCommandContext() { this.inCommandContext = false; }
+}
+
+// ============================================================
+// COMMAND EXECUTOR (complete — needed for command string replay)
+// ============================================================
+class CommandExecutor {
+    constructor(store, palette, camera) {
+        this.store = store; this.palette = palette; this.camera = camera;
+        this.cursor = { x: 0, y: 0, z: 0 }; this.currentView = 0;
+        this.mode = 'normal'; this.gridSize = 1.0; this.cornerIndex = 0;
+        this.lastCommand = ''; this.commandHistory = []; this.lastCompoundCommand = '';
+        this.colorContext = new ColorContext(store, palette);
+        this.cameraContext = new CameraContext(camera);
+        this.selectionContext = new FrameSelectionContext(store);
+        this.commandTree = new CommandTree();
+        this.animationActive = false; this.animationDirection = 1;
+        this.animationInterval = 200; this.animationLastTime = 0; this.animationColorStep = 1;
+        this.lineHW = 0.018; this.lineExt = 0.125; this.gpuLineUpdate = null;
+    }
+
+    expandRepeats(cmdString) {
+        let result = '', i = 0;
+        while (i < cmdString.length) {
+            if (cmdString[i] === '(') {
+                let depth = 0, commaPos = -1, j = i;
+                while (j < cmdString.length) {
+                    if (cmdString[j] === '(') depth++;
+                    if (cmdString[j] === ')') { depth--; if (depth === 0) break; }
+                    if (cmdString[j] === ',' && depth === 1) commaPos = j;
+                    j++;
+                }
+                if (commaPos === -1) { result += cmdString[i]; i++; continue; }
+                const command = cmdString.substring(i + 1, commaPos);
+                const count = parseInt(cmdString.substring(commaPos + 1, j));
+                if (isNaN(count)) { result += cmdString[i]; i++; continue; }
+                result += this.expandRepeats(command).repeat(count);
+                i = j + 1;
+            } else { result += cmdString[i]; i++; }
+        }
+        return result;
+    }
+
+    condenseCommandString(cmdString) {
+        if (!cmdString || cmdString.length === 0) return '';
+        let result = '', i = 0;
+        while (i < cmdString.length) {
+            const c = cmdString[i]; let count = 1;
+            while (i + count < cmdString.length && cmdString[i + count] === c) count++;
+            result += count === 1 ? c : `(${c},${count})`;
+            i += count;
+        }
+        return result;
+    }
+
+    executeCommandString(cmdString) {
+        const expanded = this.expandRepeats(cmdString);
+        for (let i = 0; i < expanded.length; i++) this.executeKey(expanded[i], false);
+        this.lastCompoundCommand = cmdString;
+    }
+
+    executeKey(key, shift = false) {
+        if (this.selectionContext.bracketInputActive) {
+            if (key === 'Enter') { const input = document.getElementById('bracket-input'); this.selectionContext.submitBracketInput(input.value); return; }
+            else if (key === 'Escape') { this.selectionContext.closeBracketInput(); return; }
+            return;
+        }
+        if (this.commandTree.inCommandContext) return this.handleCommandContextNavigation(key);
+        if (this.colorContext.active) return this.handleColorContextNavigation(key);
+        if (this.cameraContext.active) return this.handleCameraContextNavigation(key, shift);
+        if (this.selectionContext.active) return this.handleSelectionContextNavigation(key, shift);
+        if (key === 'n' && this.lastCompoundCommand) { this.executeCommandString(this.lastCompoundCommand); this.commandTree.addCommand(key); return; }
+
+        if (this.mode === 'translate') { if (['i','j','k','l'].includes(key)) { this.handleTranslate(key); this.commandTree.addCommand(key); return; } this.mode = 'normal'; }
+        else if (this.mode === 'translateCursor') { if (['i','j','k','l'].includes(key)) { this.handleTranslateCursor(key); this.commandTree.addCommand(key); return; } this.mode = 'normal'; }
+        else if (this.mode === 'scale') { if (['i','k'].includes(key)) { this.handleScale(key); this.commandTree.addCommand(key); return; } this.mode = 'normal'; }
+        else if (this.mode === 'scaleSelection') { if (['i','k'].includes(key)) { this.handleScaleSelection(key); this.commandTree.addCommand(key); return; } this.mode = 'normal'; }
+        else if (this.mode === 'animation') {
+            if (key === 'i') { this.animationColorStep = Math.min(40, this.animationColorStep + 1); this.commandTree.addCommand(key); return; }
+            if (key === 'k') { this.animationColorStep = Math.max(1, this.animationColorStep - 1); this.commandTree.addCommand(key); return; }
+            if (key === 'l') { this.animationInterval = Math.max(50, this.animationInterval - 50); this.commandTree.addCommand(key); return; }
+            if (key === 'j') { this.animationInterval = Math.min(2000, this.animationInterval + 50); this.commandTree.addCommand(key); return; }
+            if (key === 'm') { this.animationActive = false; this.mode = 'normal'; this.commandTree.addCommand(key); return; }
+            this.mode = 'normal';
+        }
+        else if (this.mode === 'lineStyle') { if (['i','j','k','l'].includes(key)) { this._adjustLineStyle(key); this.commandTree.addCommand(key); return; } this.mode = 'normal'; }
+
+        switch (key) {
+            case 'f': this.createFrame(); this.commandTree.addCommand(key); break;
+            case 'd': case 'D': this.duplicateSelected(); this.commandTree.addCommand(key); break;
+            case 't': this.mode = 'translate'; this.commandTree.addCommand(key); break;
+            case 'T': this.mode = 'translateCursor'; this.commandTree.addCommand(key); break;
+            case 's': this.mode = 'scale'; this.commandTree.addCommand(key); break;
+            case 'S': this.mode = 'scaleSelection'; this.commandTree.addCommand(key); break;
+            case 'r': this.rotateSelected(Math.PI / 2); this.commandTree.addCommand(key); break;
+            case 'R': this.rotateSelected(Math.PI / 4); this.commandTree.addCommand(key); break;
+            case 'e': this.reflectSelectedH(); this.commandTree.addCommand(key); break;
+            case 'E': this.reflectSelectedV(); this.commandTree.addCommand(key); break;
+            case 'a': this.selectAllOfColor(); this.commandTree.addCommand(key); break;
+            case 'A': this.store.selectAll(); this.commandTree.addCommand(key); break;
+            case 'z': this.cursor.x=0; this.cursor.y=0; this.cursor.z=0; this.commandTree.addCommand(key); break;
+            case 'Z': this.centerStructureToCursor(); this.commandTree.addCommand(key); break;
+            case ' ': this.snapSelectionToCursor(); this.commandTree.addCommand(key); break;
+            case 'x': this.deleteSelected(); this.commandTree.addCommand(key); break;
+            case 'p': this.colorContext.enter(); this.commandTree.addCommand(key); break;
+            case '#': this.selectionContext.enter(); this.commandTree.addCommand(key); break;
+            case 'q': this.cycleCorner(); this.commandTree.addCommand(key); break;
+            case 'v': this.cameraContext.enter(); this.commandTree.addCommand(key); break;
+            case 'm': this.animationActive=true; this.animationLastTime=performance.now(); this.mode='animation'; this.commandTree.addCommand(key); break;
+            case 'y': this.mode = 'lineStyle'; this.commandTree.addCommand(key); break;
+            case 'u': this.commandTree.enterCommandContext(); this.commandTree.addCommand(key); break;
+            case '0': case '1': case '2': case '3': case '4': case '5': case '6':
+                this.currentView = parseInt(key); this.commandTree.addCommand(key); break;
+        }
+        this.lastCommand = key; this.commandHistory.push(key);
+    }
+
+    handleCommandContextNavigation(key) {
+        const tree = this.commandTree;
+        if (!['i','j','k','l'].includes(key)) {
+            const nextCmd = tree.peekNextCommand();
+            if (key === nextCmd) { tree.moveForward(); tree.exitCommandContext(); this.mode='normal'; this.executeKeyNormal(key); }
+            else { tree.exitCommandContext(); tree.addCommand(key); this.reconstructState(); this.mode='normal'; this.executeKeyNormal(key); }
+            return;
+        }
+        switch (key) { case 'j': tree.moveBack(); this.reconstructState(); break; case 'l': tree.moveForward(); this.reconstructState(); break; case 'i': tree.moveUp(); this.reconstructState(); break; case 'k': tree.moveDown(); this.reconstructState(); break; }
+    }
+
+    handleColorContextNavigation(key) {
+        const ctx = this.colorContext;
+        if (['i','j','k','l'].includes(key)) { ctx.navigate(key); this.commandTree.addCommand(key); return; }
+        if (key === 'p') { ctx.apply(); ctx.exit(); this.commandTree.addCommand(key); return; }
+        ctx.apply(); ctx.exit(); this.mode='normal'; this.executeKeyNormal(key); this.commandTree.addCommand(key);
+    }
+
+    handleCameraContextNavigation(key, shift = false) {
+        const ctx = this.cameraContext;
+        if (['0','1','2','3','4','5','6','7','8','9'].includes(key)) { ctx.selectView(parseInt(key)); this.commandTree.addCommand(key); return; }
+        if (['i','I','j','J','k','K','l','L'].includes(key)) { ctx.navigate(key, shift); this.commandTree.addCommand(key); return; }
+        if (key === 'v') { ctx.exit(); this.commandTree.addCommand(key); return; }
+        ctx.exit(); this.mode='normal'; this.executeKeyNormal(key); this.commandTree.addCommand(key);
+    }
+
+    handleSelectionContextNavigation(key, shift = false) {
+        const ctx = this.selectionContext;
+        if (key === '[') { ctx.openBracketInput(); return; }
+        const isNavKey = ['i','j','k','l'].includes(key.toLowerCase());
+        if (isNavKey) {
+            const lk = key.toLowerCase(), isShift = key !== lk || shift;
+            if (isShift && (lk === 'j' || lk === 'l')) { if (lk === 'j') ctx.contractLower(); else ctx.contractUpper(); }
+            else { switch (lk) { case 'l': ctx.expandUp(); break; case 'j': ctx.expandDown(); break; case 'i': ctx.shiftUp(); break; case 'k': ctx.shiftDown(); break; } }
+            this.commandTree.addCommand(key); return;
+        }
+        if (key === 'a') { ctx.selectAllSameColor(); this.commandTree.addCommand(key); return; }
+        if (key === '#') { ctx.exit(); this.commandTree.addCommand(key); return; }
+        ctx.exit(); this.mode='normal'; this.executeKeyNormal(key); this.commandTree.addCommand(key);
+    }
+
+    reconstructState() {
+        const seq = this.commandTree.getCurrentCommandSequence();
+        this.store.clear(); this.palette.reset();
+        const was = this.commandTree.inCommandContext;
+        this.commandTree.inCommandContext = true;
+        for (let i = 0; i < seq.length; i++) this.executeKeyNormal(seq[i]);
+        this.commandTree.inCommandContext = was;
+    }
+
+    executeKeyNormal(key) {
+        if (this.mode === 'translate') { if (['i','j','k','l'].includes(key)) return this.handleTranslate(key); this.mode='normal'; }
+        else if (this.mode === 'translateCursor') { if (['i','j','k','l'].includes(key)) return this.handleTranslateCursor(key); this.mode='normal'; }
+        else if (this.mode === 'animation') {
+            if (key === 'i') { this.animationColorStep = Math.min(40, this.animationColorStep + 1); return; }
+            if (key === 'k') { this.animationColorStep = Math.max(1, this.animationColorStep - 1); return; }
+            if (key === 'l') { this.animationInterval = Math.max(50, this.animationInterval - 50); return; }
+            if (key === 'j') { this.animationInterval = Math.min(2000, this.animationInterval + 50); return; }
+            if (key === 'm') { this.animationActive = false; this.mode = 'normal'; return; }
+            this.mode = 'normal';
+        }
+        else if (this.mode === 'scale') { if (['i','k'].includes(key)) return this.handleScale(key); this.mode='normal'; }
+        else if (this.mode === 'scaleSelection') { if (['i','k'].includes(key)) return this.handleScaleSelection(key); this.mode='normal'; }
+        else if (this.mode === 'lineStyle') { if (['i','j','k','l'].includes(key)) { this._adjustLineStyle(key); return; } this.mode = 'normal'; }
+        switch (key) {
+            case 'f': this.createFrame(); break;
+            case 'd': case 'D': this.duplicateSelected(); break;
+            case 'x': this.deleteSelected(); break;
+            case 't': this.mode='translate'; break;
+            case 'T': this.mode='translateCursor'; break;
+            case 's': this.mode='scale'; break;
+            case 'S': this.mode='scaleSelection'; break;
+            case 'r': this.rotateSelected(Math.PI / 2); break;
+            case 'R': this.rotateSelected(Math.PI / 4); break;
+            case 'e': this.reflectSelectedH(); break;
+            case 'E': this.reflectSelectedV(); break;
+            case 'a': this.selectAllOfColor(); break;
+            case 'A': this.store.selectAll(); break;
+            case 'z': this.cursor.x=0; this.cursor.y=0; this.cursor.z=0; break;
+            case 'Z': this.centerStructureToCursor(); break;
+            case ' ': this.snapSelectionToCursor(); break;
+            case 'm': this.animationActive=true; this.animationLastTime=performance.now(); this.mode='animation'; break;
+            case 'y': this.mode='lineStyle'; break;
+            case '0': case '1': case '2': case '3': case '4': case '5': case '6': this.currentView = parseInt(key); break;
+        }
+    }
+
+    updateAnimation(now) {
+        if (!this.animationActive) return;
+        if (now - this.animationLastTime >= this.animationInterval) {
+            this.store.animateAllColors(this.animationColorStep, 8, 80);
+            this.animationLastTime += this.animationInterval;
+            if (now - this.animationLastTime > this.animationInterval) this.animationLastTime = now;
+        }
+    }
+
+    _adjustLineStyle(key) {
+        const hwStep = 0.004, extStep = 0.25;
+        if (key === 'l') this.lineHW = Math.min(0.15, this.lineHW + hwStep);
+        if (key === 'j') this.lineHW = Math.max(0.002, this.lineHW - hwStep);
+        if (key === 'i') this.lineExt = Math.min(8.0, this.lineExt + extStep);
+        if (key === 'k') this.lineExt = Math.max(0, this.lineExt - extStep);
+        if (this.gpuLineUpdate) this.gpuLineUpdate(this.lineHW, this.lineExt);
+    }
+
+    handleTranslate(key) {
+        const step = this.gridSize, view = this.currentView;
+        let dx=0, dy=0, dz=0;
+        switch (view) {
+            case 0: case 1: if(key==='i')dy=step;else if(key==='k')dy=-step;else if(key==='j')dx=-step;else if(key==='l')dx=step; break;
+            case 2: if(key==='i')dy=step;else if(key==='k')dy=-step;else if(key==='j')dz=step;else if(key==='l')dz=-step; break;
+            case 3: if(key==='i')dy=step;else if(key==='k')dy=-step;else if(key==='j')dx=step;else if(key==='l')dx=-step; break;
+            case 4: if(key==='i')dy=step;else if(key==='k')dy=-step;else if(key==='j')dz=-step;else if(key==='l')dz=step; break;
+            case 5: if(key==='i')dz=-step;else if(key==='k')dz=step;else if(key==='j')dx=-step;else if(key==='l')dx=step; break;
+            case 6: if(key==='i')dz=step;else if(key==='k')dz=-step;else if(key==='j')dx=-step;else if(key==='l')dx=step; break;
+        }
+        this.store.translateSelected(dx, dy, dz);
+    }
+
+    handleTranslateCursor(key) {
+        const step = this.gridSize, view = this.currentView;
+        let dx=0, dy=0, dz=0;
+        switch (view) {
+            case 0: case 1: if(key==='i')dy=step;else if(key==='k')dy=-step;else if(key==='j')dx=-step;else if(key==='l')dx=step; break;
+            case 2: if(key==='i')dy=step;else if(key==='k')dy=-step;else if(key==='j')dz=step;else if(key==='l')dz=-step; break;
+            case 3: if(key==='i')dy=step;else if(key==='k')dy=-step;else if(key==='j')dx=step;else if(key==='l')dx=-step; break;
+            case 4: if(key==='i')dy=step;else if(key==='k')dy=-step;else if(key==='j')dz=-step;else if(key==='l')dz=step; break;
+            case 5: if(key==='i')dz=-step;else if(key==='k')dz=step;else if(key==='j')dx=-step;else if(key==='l')dx=step; break;
+            case 6: if(key==='i')dz=step;else if(key==='k')dz=-step;else if(key==='j')dx=-step;else if(key==='l')dx=step; break;
+        }
+        this.cursor.x += dx; this.cursor.y += dy; this.cursor.z += dz;
+    }
+
+    createFrame() {
+        const colorIndex = this.palette.getNextColor();
+        let nx, ny, nz;
+        switch (this.currentView) {
+            case 0: case 1: nx=0; ny=0; nz=1; break;
+            case 2: nx=1; ny=0; nz=0; break;
+            case 3: nx=0; ny=0; nz=-1; break;
+            case 4: nx=-1; ny=0; nz=0; break;
+            case 5: nx=0; ny=1; nz=0; break;
+            case 6: nx=0; ny=-1; nz=0; break;
+            default: nx=0; ny=0; nz=1;
+        }
+        this.store.deselectAll();
+        this.store.addFrame(this.cursor.x, this.cursor.y, this.cursor.z, nx, ny, nz, 1.0, colorIndex);
+    }
+
+    duplicateSelected() { this.store.duplicateSelected(); }
+    deleteSelected() { this.store.deleteSelected(); }
+    rotateSelected(angle) { this.store.rotateSelected(this.cursor.x, this.cursor.y, this.cursor.z, angle, this.currentView); }
+    reflectSelectedH() { this.store.reflectSelectedH(this.cursor.x, this.cursor.y, this.cursor.z, this.currentView); }
+    reflectSelectedV() { this.store.reflectSelectedV(this.cursor.x, this.cursor.y, this.cursor.z, this.currentView); }
+    handleScale(key) { const f = key === 'i' ? 1.1 : 0.9; this.store.scaleSelected(f); }
+    handleScaleSelection(key) { const f = key === 'i' ? 1.1 : 0.9; this.store.scaleSelectionGroup(f); }
+    selectAllOfColor() { this.store.selectAllOfColor(); }
+    snapSelectionToCursor() { this.store.snapSelectionToCursor(this.cursor.x, this.cursor.y, this.cursor.z); }
+    centerStructureToCursor() { this.store.centerStructureToCursor(this.cursor.x, this.cursor.y, this.cursor.z); }
+
+    cycleCorner() {
+        const bbox = this.store.getBoundingBox();
+        const corners = [
+            {x:bbox.maxX,y:bbox.maxY,z:bbox.maxZ}, {x:bbox.minX,y:bbox.maxY,z:bbox.maxZ},
+            {x:bbox.minX,y:bbox.minY,z:bbox.maxZ}, {x:bbox.maxX,y:bbox.minY,z:bbox.maxZ},
+            {x:bbox.maxX,y:bbox.maxY,z:bbox.minZ}, {x:bbox.minX,y:bbox.maxY,z:bbox.minZ},
+            {x:bbox.minX,y:bbox.minY,z:bbox.minZ}, {x:bbox.maxX,y:bbox.minY,z:bbox.minZ}
+        ];
+        const corner = corners[this.cornerIndex % 8];
+        this.cursor.x = corner.x; this.cursor.y = corner.y; this.cursor.z = corner.z;
+        this.cornerIndex = (this.cornerIndex + 1) % 8;
+    }
+}
+
+// ============================================================
+// CONSTANTS + MATH
+// ============================================================
+const MAX_INSTANCES = 2_097_152;
+const { PI, sin, cos, tan, sqrt, abs, max, min, floor, ceil, random } = Math;
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+function mat4Perspective(out, fov, aspect, near, far) {
+    const f = 1 / tan(fov / 2), nf = 1 / (near - far);
+    out[0]=f/aspect; out[1]=0; out[2]=0; out[3]=0;
+    out[4]=0; out[5]=f; out[6]=0; out[7]=0;
+    out[8]=0; out[9]=0; out[10]=(far+near)*nf; out[11]=-1;
+    out[12]=0; out[13]=0; out[14]=2*far*near*nf; out[15]=0;
+}
+
+function mat4LookAt(out, eye, tgt, up) {
+    let zx=eye[0]-tgt[0], zy=eye[1]-tgt[1], zz=eye[2]-tgt[2];
+    let len=sqrt(zx*zx+zy*zy+zz*zz);
+    if(len>0){zx/=len;zy/=len;zz/=len;}
+    let xx=up[1]*zz-up[2]*zy, xy=up[2]*zx-up[0]*zz, xz=up[0]*zy-up[1]*zx;
+    len=sqrt(xx*xx+xy*xy+xz*xz);
+    if(len>0){xx/=len;xy/=len;xz/=len;}
+    const yx=zy*xz-zz*xy, yy=zz*xx-zx*xz, yz=zx*xy-zy*xx;
+    out[0]=xx; out[1]=yx; out[2]=zx; out[3]=0;
+    out[4]=xy; out[5]=yy; out[6]=zy; out[7]=0;
+    out[8]=xz; out[9]=yz; out[10]=zz; out[11]=0;
+    out[12]=-(xx*eye[0]+xy*eye[1]+xz*eye[2]);
+    out[13]=-(yx*eye[0]+yy*eye[1]+yz*eye[2]);
+    out[14]=-(zx*eye[0]+zy*eye[1]+zz*eye[2]);
+    out[15]=1;
+}
+
+function mat4Mul(out, a, b) {
+    for(let i=0;i<4;i++) for(let j=0;j<4;j++)
+        out[j*4+i]=a[i]*b[j*4]+a[4+i]*b[j*4+1]+a[8+i]*b[j*4+2]+a[12+i]*b[j*4+3];
+}
+
+// ============================================================
+// 80-COLOR PALETTE — Checks EightyColors
+// ============================================================
+function buildPalette() {
+    const hexColors = [
+        'E84AA9','F2399D','DB2F96','E73E85','FF7F8E','FA5B67','E8424E','D5332F',
+        'C23532','F2281C','D41515','9D262F','DE3237','DA3321','EA3A2D','EB4429',
+        'EC7368','FF8079','FF9193','EA5B33','D05C35','ED7C30','EF9933','EF8C37',
+        'F18930','F09837','F9A45C','F2A43A','F2A840','F2A93C','FFB340','F2B341',
+        'FAD064','F7CA57','F6CB45','FFAB00','F4C44A','FCDE5B','F9DA4D','F9DA4A',
+        'FAE272','F9DB49','FAE663','FBEA5B','A7CA45','B5F13B','94E337','63C23C',
+        '86E48E','77E39F','5FCD8C','83F1AE','9DEFBF','2E9D9A','3EB8A1','5FC9BF',
+        '77D3DE','6AD1DE','5ABAD3','4291A8','33758D','45B2D3','81D1EC','A7DDF9',
+        '9AD9FB','A4C8EE','60B1F4','2480BD','4576D0','3263D0','2E4985','25438C',
+        '525EAA','3D43B3','322F92','4A2387','371471','3B088C','6C31D7','9741DA'
+    ];
+    const c = new Float32Array(80 * 4);
+    for (let i = 0; i < 80; i++) {
+        const hex = hexColors[i];
+        c[i*4] = parseInt(hex.substring(0, 2), 16) / 255;
+        c[i*4+1] = parseInt(hex.substring(2, 4), 16) / 255;
+        c[i*4+2] = parseInt(hex.substring(4, 6), 16) / 255;
+        c[i*4+3] = 1;
+    }
+    return c;
+}
+const PALETTE_DATA = buildPalette();
+
+const VP = [
+    { name:'Spatial',  i:[0,1,0], k:[0,-1,0], j:[-1,0,0], l:[1,0,0],  n:[0,0,1] },
+    { name:'Front',    i:[0,1,0], k:[0,-1,0], j:[-1,0,0], l:[1,0,0],  n:[0,0,1] },
+    { name:'Right',    i:[0,1,0], k:[0,-1,0], j:[0,0,1],  l:[0,0,-1], n:[-1,0,0] },
+    { name:'Back',     i:[0,1,0], k:[0,-1,0], j:[1,0,0],  l:[-1,0,0], n:[0,0,-1] },
+    { name:'Left',     i:[0,1,0], k:[0,-1,0], j:[0,0,-1], l:[0,0,1],  n:[1,0,0] },
+    { name:'Top',      i:[0,0,-1],k:[0,0,1],  j:[-1,0,0], l:[1,0,0],  n:[0,1,0] },
+    { name:'Bottom',   i:[0,0,1], k:[0,0,-1], j:[-1,0,0], l:[1,0,0],  n:[0,-1,0] },
+];
+
+// ============================================================
+// GEOMETRY
+// ============================================================
+function buildFrameGeo(hw = 0.018, ext = 0.125) {
+    const inner = 0.5, outer = 0.5 + ext;
+    const lines = [[-outer,inner,outer,inner],[-outer,-inner,outer,-inner],[-inner,-outer,-inner,outer],[inner,-outer,inner,outer]];
+    const v = [], ix = [];
+    for (let i = 0; i < 4; i++) {
+        const [sx,sy,ex,ey] = lines[i];
+        const dx=ex-sx, dy=ey-sy, len=sqrt(dx*dx+dy*dy);
+        const nx=(-dy/len)*hw, ny=(dx/len)*hw;
+        const b = i * 4;
+        v.push(sx,sy,nx,ny, sx,sy,-nx,-ny, ex,ey,nx,ny, ex,ey,-nx,-ny);
+        ix.push(b,b+1,b+2, b+2,b+1,b+3);
+    }
+    return { verts: new Float32Array(v), idx: new Uint16Array(ix) };
+}
+
+function buildCursorGeo() {
+    const s=1.0, w=0.06;
+    const axes = [[[-s,0,0],[s,0,0],[0,w,0]], [[0,-s,0],[0,s,0],[w,0,0]], [[0,0,-s],[0,0,s],[0,w,0]]];
+    const v=[], ix=[];
+    for(let i=0;i<3;i++){
+        const [a,b,n]=axes[i], base=i*4;
+        v.push(a[0]+n[0],a[1]+n[1],a[2]+n[2], a[0]-n[0],a[1]-n[1],a[2]-n[2], b[0]+n[0],b[1]+n[1],b[2]+n[2], b[0]-n[0],b[1]-n[1],b[2]-n[2]);
+        ix.push(base,base+1,base+2, base+2,base+1,base+3);
+    }
+    return { verts: new Float32Array(v), idx: new Uint16Array(ix) };
+}
+
+// ============================================================
+// SHADERS
+// ============================================================
+const RENDER_SHADER = `
+struct Uniforms { viewProj: mat4x4<f32>, cursor: vec3<f32>, showCursor: f32, };
+struct Instance { px: f32, py: f32, pz: f32, scale: f32, rx: f32, ry: f32, rz: f32, colorIdx: u32, ux: f32, uy: f32, uz: f32, flags: u32, nx: f32, ny: f32, nz: f32, frameId: u32, };
+@group(0) @binding(0) var<uniform> u: Uniforms;
+@group(0) @binding(1) var<storage, read> visible: array<u32>;
+@group(0) @binding(2) var<storage, read> instances: array<Instance>;
+@group(0) @binding(3) var<storage, read> palette: array<vec4<f32>>;
+struct V2F { @builtin(position) pos: vec4<f32>, @location(0) col: vec4<f32> };
+@vertex fn vs_frame(@location(0) lp: vec4<f32>, @builtin(instance_index) ii: u32) -> V2F {
+  let idx = visible[ii]; let inst = instances[idx];
+  let basis = mat3x3<f32>(vec3<f32>(inst.rx, inst.ry, inst.rz), vec3<f32>(inst.ux, inst.uy, inst.uz), vec3<f32>(inst.nx, inst.ny, inst.nz));
+  let center = vec3<f32>(lp.x * inst.scale, lp.y * inst.scale, 0.0);
+  let perp = vec3<f32>(lp.z, lp.w, 0.0);
+  var p = basis * (center + perp); p += vec3<f32>(inst.px, inst.py, inst.pz);
+  var o: V2F; o.pos = u.viewProj * vec4<f32>(p, 1.0);
+  var c = palette[inst.colorIdx % 80u];
+  if ((inst.flags & 1u) != 0u) { c = mix(c, vec4<f32>(1.0,1.0,1.0,1.0), 0.4); }
+  o.col = c; return o;
+}
+@fragment fn fs_frame(v: V2F) -> @location(0) vec4<f32> { return v.col; }
+@vertex fn vs_cursor(@location(0) lp: vec3<f32>) -> V2F {
+  var p = lp * 0.15 + u.cursor; var o: V2F;
+  o.pos = u.viewProj * vec4<f32>(p, 1.0);
+  o.col = vec4<f32>(1.0, 1.0, 1.0, 0.7);
+  if (u.showCursor < 0.5) { o.pos = vec4<f32>(0.0, 0.0, -2.0, 1.0); }
+  return o;
+}
+@fragment fn fs_cursor(v: V2F) -> @location(0) vec4<f32> { return v.col; }
+`;
+
+const CULL_SHADER = `
+struct CullUniforms { planes: array<vec4<f32>, 6>, totalInstances: u32, };
+struct Instance { px: f32, py: f32, pz: f32, scale: f32, rx: f32, ry: f32, rz: f32, colorIdx: u32, ux: f32, uy: f32, uz: f32, flags: u32, nx: f32, ny: f32, nz: f32, frameId: u32, };
+struct IndirectArgs { indexCount: u32, instanceCount: atomic<u32>, firstIndex: u32, baseVertex: u32, firstInstance: u32, };
+@group(0) @binding(0) var<uniform> cu: CullUniforms;
+@group(0) @binding(1) var<storage, read> instances: array<Instance>;
+@group(0) @binding(2) var<storage, read_write> visible: array<u32>;
+@group(0) @binding(3) var<storage, read_write> indirect: IndirectArgs;
+@compute @workgroup_size(256) fn cull_main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x; if (i >= cu.totalInstances) { return; }
+  let inst = instances[i]; let pos = vec3<f32>(inst.px, inst.py, inst.pz);
+  let radius = inst.scale * 0.9; var inside = true;
+  for (var p = 0u; p < 6u; p++) { let plane = cu.planes[p]; let dist = dot(plane.xyz, pos) + plane.w; if (dist < -radius) { inside = false; break; } }
+  if (inside) { let slot = atomicAdd(&indirect.instanceCount, 1u); visible[slot] = i; }
+}
+`;
+
+// ============================================================
+// FRUSTUM PLANE EXTRACTION
+// ============================================================
+function extractFrustumPlanes(vp) {
+    const r0=[vp[0],vp[4],vp[8],vp[12]], r1=[vp[1],vp[5],vp[9],vp[13]], r2=[vp[2],vp[6],vp[10],vp[14]], r3=[vp[3],vp[7],vp[11],vp[15]];
+    const planes = new Float32Array(24);
+    function setPlane(idx, a, b, c, d) { const len=sqrt(a*a+b*b+c*c); planes[idx*4]=a/len; planes[idx*4+1]=b/len; planes[idx*4+2]=c/len; planes[idx*4+3]=d/len; }
+    setPlane(0,r3[0]+r0[0],r3[1]+r0[1],r3[2]+r0[2],r3[3]+r0[3]);
+    setPlane(1,r3[0]-r0[0],r3[1]-r0[1],r3[2]-r0[2],r3[3]-r0[3]);
+    setPlane(2,r3[0]+r1[0],r3[1]+r1[1],r3[2]+r1[2],r3[3]+r1[3]);
+    setPlane(3,r3[0]-r1[0],r3[1]-r1[1],r3[2]-r1[2],r3[3]-r1[3]);
+    setPlane(4,r3[0]+r2[0],r3[1]+r2[1],r3[2]+r2[2],r3[3]+r2[3]);
+    setPlane(5,r3[0]-r2[0],r3[1]-r2[1],r3[2]-r2[2],r3[3]-r2[3]);
+    return planes;
+}
+
+// ============================================================
+// CAMERA CONTROLLER
+// ============================================================
+class Camera {
+    constructor(canvas) {
+        this.theta = PI/4; this.phi = PI/6; this.dist = 30;
+        this.fov = PI/4;
+        this.target = [0, 0, 0];
+        this.eye = new Float32Array(3);
+        this.view = new Float32Array(16);
+        this.proj = new Float32Array(16);
+        this.vp = new Float32Array(16);
+        this._dirty = true; this._dragging = false; this._panning = false;
+        this._lx = 0; this._ly = 0;
+
+        canvas.addEventListener('mousedown', e => {
+            if (e.button === 0 && !e.altKey) this._dragging = true;
+            else if (e.button === 2 || (e.button === 0 && e.altKey)) this._panning = true;
+            this._lx = e.clientX; this._ly = e.clientY; e.preventDefault();
+        });
+        window.addEventListener('mousemove', e => {
+            if (!this._dragging && !this._panning) return;
+            const dx = e.clientX - this._lx, dy = e.clientY - this._ly;
+            this._lx = e.clientX; this._ly = e.clientY;
+            if (this._dragging) { this.theta -= dx * 0.005; this.phi = clamp(this.phi + dy * 0.005, -PI/2+0.01, PI/2-0.01); this._dirty = true; }
+            else { const s = this.dist * 0.002; const rx = -cos(this.theta), rz = sin(this.theta); const ux = -sin(this.phi)*sin(this.theta), uy = cos(this.phi), uz = -sin(this.phi)*cos(this.theta); this.target[0] += (-dx*rx + dy*ux)*s; this.target[1] += dy*uy*s; this.target[2] += (-dx*rz + dy*uz)*s; this._dirty = true; }
+        });
+        window.addEventListener('mouseup', () => { this._dragging = false; this._panning = false; });
+        canvas.addEventListener('wheel', e => { this.dist = clamp(this.dist * (1 + e.deltaY * 0.001), 0.5, 2000); this._dirty = true; e.preventDefault(); }, { passive: false });
+        canvas.addEventListener('contextmenu', e => e.preventDefault());
+    }
+
+    update(aspect) {
+        this.eye[0] = this.target[0] + this.dist * cos(this.phi) * sin(this.theta);
+        this.eye[1] = this.target[1] + this.dist * sin(this.phi);
+        this.eye[2] = this.target[2] + this.dist * cos(this.phi) * cos(this.theta);
+        const rx = cos(this.theta), rz = -sin(this.theta);
+        const fx=this.target[0]-this.eye[0], fy=this.target[1]-this.eye[1], fz=this.target[2]-this.eye[2];
+        const fl = sqrt(fx*fx+fy*fy+fz*fz);
+        const fdx=fx/fl, fdy=fy/fl, fdz=fz/fl;
+        let ux=0*fdz-rz*fdy, uy=rz*fdx-rx*fdz, uz=rx*fdy-0*fdx;
+        const ul = sqrt(ux*ux+uy*uy+uz*uz); ux/=ul; uy/=ul; uz/=ul;
+        mat4LookAt(this.view, this.eye, this.target, [ux,uy,uz]);
+        mat4Perspective(this.proj, this.fov, aspect, 0.1, 2000);
+        mat4Mul(this.vp, this.proj, this.view);
+        const d = this._dirty; this._dirty = false; return d;
+    }
+
+    invalidate() { this._dirty = true; }
+}
+
+// ============================================================
+// MAIN — VIEWER MODE
+// ============================================================
+async function main() {
+    const canvas = document.getElementById('canvas');
+    const errEl = document.getElementById('error-msg');
+
+    if (!navigator.gpu) { errEl.style.display='block'; errEl.textContent='WebGPU not supported. Use Chrome 113+.'; return; }
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+    if (!adapter) { errEl.style.display='block'; errEl.textContent='No WebGPU adapter.'; return; }
+
+    const limits = adapter.limits;
+    const device = await adapter.requestDevice({
+        requiredLimits: {
+            maxStorageBufferBindingSize: min(MAX_INSTANCES * BYTES_PER_INSTANCE, limits.maxStorageBufferBindingSize),
+            maxBufferSize: min(MAX_INSTANCES * BYTES_PER_INSTANCE, limits.maxBufferSize),
+            maxComputeWorkgroupsPerDimension: limits.maxComputeWorkgroupsPerDimension,
+        },
+    });
+
+    const ctx = canvas.getContext('webgpu');
+    const fmt = navigator.gpu.getPreferredCanvasFormat();
+    ctx.configure({ device, format: fmt, alphaMode: 'opaque' });
+
+    const frameGeo = buildFrameGeo();
+    const frameVB = device.createBuffer({ size: frameGeo.verts.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(frameVB, 0, frameGeo.verts);
+    const frameIB = device.createBuffer({ size: frameGeo.idx.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(frameIB, 0, frameGeo.idx);
+    const frameIdxCount = frameGeo.idx.length;
+
+    const curGeo = buildCursorGeo();
+    const curVB = device.createBuffer({ size: curGeo.verts.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(curVB, 0, curGeo.verts);
+    const curIB = device.createBuffer({ size: curGeo.idx.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(curIB, 0, curGeo.idx);
+    const curIdxCount = curGeo.idx.length;
+
+    const maxBytes = MAX_INSTANCES * BYTES_PER_INSTANCE;
+    const instanceBuf = device.createBuffer({ size: maxBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    const visibleBuf = device.createBuffer({ size: MAX_INSTANCES * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    const indirectBuf = device.createBuffer({ size: 20, usage: GPUBufferUsage.INDIRECT | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+    const paletteBuf = device.createBuffer({ size: PALETTE_DATA.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    device.queue.writeBuffer(paletteBuf, 0, PALETTE_DATA);
+    const uniformBuf = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const cullUniformBuf = device.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const readbackBuf = device.createBuffer({ size: 20, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+
+    const renderShader = device.createShaderModule({ code: RENDER_SHADER });
+    const cullShader = device.createShaderModule({ code: CULL_SHADER });
+
+    const renderBGL = device.createBindGroupLayout({ entries: [
+        { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
+        { binding: 2, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
+        { binding: 3, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
+    ]});
+    const renderBG = device.createBindGroup({ layout: renderBGL, entries: [
+        { binding: 0, resource: { buffer: uniformBuf } },
+        { binding: 1, resource: { buffer: visibleBuf } },
+        { binding: 2, resource: { buffer: instanceBuf } },
+        { binding: 3, resource: { buffer: paletteBuf } },
+    ]});
+
+    const vbl = { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] };
+    const frameVbl = { arrayStride: 16, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }] };
+    const depthFormat = 'depth24plus';
+    const SAMPLE_COUNT = 4;
+
+    const framePipeline = device.createRenderPipeline({
+        layout: device.createPipelineLayout({ bindGroupLayouts: [renderBGL] }),
+        vertex: { module: renderShader, entryPoint: 'vs_frame', buffers: [frameVbl] },
+        fragment: { module: renderShader, entryPoint: 'fs_frame', targets: [{ format: fmt }] },
+        primitive: { topology: 'triangle-list', cullMode: 'none' },
+        depthStencil: { format: depthFormat, depthWriteEnabled: true, depthCompare: 'less' },
+        multisample: { count: SAMPLE_COUNT },
+    });
+    const cursorPipeline = device.createRenderPipeline({
+        layout: device.createPipelineLayout({ bindGroupLayouts: [renderBGL] }),
+        vertex: { module: renderShader, entryPoint: 'vs_cursor', buffers: [vbl] },
+        fragment: { module: renderShader, entryPoint: 'fs_cursor', targets: [{ format: fmt }] },
+        primitive: { topology: 'triangle-list', cullMode: 'none' },
+        depthStencil: { format: depthFormat, depthWriteEnabled: true, depthCompare: 'less' },
+        multisample: { count: SAMPLE_COUNT },
+    });
+
+    const cullBGL = device.createBindGroupLayout({ entries: [
+        { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+        { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+        { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+    ]});
+    const cullBG = device.createBindGroup({ layout: cullBGL, entries: [
+        { binding: 0, resource: { buffer: cullUniformBuf } },
+        { binding: 1, resource: { buffer: instanceBuf } },
+        { binding: 2, resource: { buffer: visibleBuf } },
+        { binding: 3, resource: { buffer: indirectBuf } },
+    ]});
+    const cullPipeline = device.createComputePipeline({
+        layout: device.createPipelineLayout({ bindGroupLayouts: [cullBGL] }),
+        compute: { module: cullShader, entryPoint: 'cull_main' },
+    });
+
+    let depthTex, msaaTex;
+    function resize() {
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = canvas.clientWidth * dpr;
+        canvas.height = canvas.clientHeight * dpr;
+        if (depthTex) depthTex.destroy();
+        if (msaaTex) msaaTex.destroy();
+        depthTex = device.createTexture({ size: [canvas.width, canvas.height], format: depthFormat, sampleCount: SAMPLE_COUNT, usage: GPUTextureUsage.RENDER_ATTACHMENT });
+        msaaTex = device.createTexture({ size: [canvas.width, canvas.height], format: fmt, sampleCount: SAMPLE_COUNT, usage: GPUTextureUsage.RENDER_ATTACHMENT });
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // App state
+    const store = new FrameStore();
+    const palette = new PaletteManager();
+    const cam = new Camera(canvas);
+    const executor = new CommandExecutor(store, palette, cam);
+    executor.gpuLineUpdate = (hw, ext) => {
+        const geo = buildFrameGeo(hw, ext);
+        device.queue.writeBuffer(frameVB, 0, geo.verts);
+    };
+
+    // ========== VIEWER MODE: Execute command string ==========
+    // Camera state is entirely determined by the command string.
+    // Use % in the builder to enter presentation mode (bounding-box fit + auto-orbit)
+    // and include that camera state in the command string before minting.
+    const showUI = false; // Always hidden in viewer mode
+
+    if (typeof autoExecuteCommand !== 'undefined' && autoExecuteCommand) {
+        executor.executeCommandString(autoExecuteCommand);
+        store.deselectAll();
+    }
+
+    // % key: presentation mode toggle (fit camera to structure, start auto-orbit)
+    window.addEventListener('keydown', e => {
+        if (e.key !== '%') return;
+        const camCtx = executor.cameraContext;
+        if (camCtx.autoOrbit) {
+            camCtx.autoOrbit = false;
+        } else {
+            if (store.count > 0) {
+                const bbox = store.getBoundingBox();
+                cam.target = [bbox.centerX, bbox.centerY, bbox.centerZ];
+                const span = Math.max(bbox.maxX - bbox.minX, bbox.maxY - bbox.minY, bbox.maxZ - bbox.minZ);
+                cam.dist = span * 1.8;
+                cam.theta = Math.PI / 4;
+                cam.phi = Math.PI / 6;
+                cam.invalidate();
+            }
+            camCtx.autoOrbit = true;
+            camCtx.autoOrbitPaused = false;
+            camCtx.orbitTheta = cam.theta;
+            camCtx.orbitPhi = cam.phi;
+            camCtx.orbitVelocityTheta = 0.15;
+            camCtx.orbitVelocityPhi = 0;
+            store.deselectAll();
+        }
+    });
+
+    // ========== RENDER LOOP (viewer — no HUD updates) ==========
+    let visibleCount = 0;
+    let pendingReadback = false;
+    let mapInFlight = false;
+    let fpsFrames = 0;
+    const indirectReset = new Uint32Array([frameIdxCount, 0, 0, 0, 0]);
+    let lastFrameTime = performance.now();
+
+    function frame() {
+        requestAnimationFrame(frame);
+
+        fpsFrames++;
+        const now = performance.now();
+        const deltaTime = (now - lastFrameTime) / 1000;
+        lastFrameTime = now;
+
+        executor.updateAnimation(now);
+        executor.cameraContext.updateAutoOrbit(deltaTime);
+
+        const n = store.count;
+        const dirty = store.getDirtyRange();
+        if (dirty && n > 0) {
+            device.queue.writeBuffer(instanceBuf, dirty.offset, store.data, dirty.offset, dirty.length);
+            store.clearDirty();
+        }
+
+        const aspect = canvas.width / canvas.height;
+        cam.fov = executor.cameraContext.fov;
+        cam.update(aspect);
+
+        const uniformData = new Float32Array(20);
+        uniformData.set(cam.vp, 0);
+        uniformData[16] = executor.cursor.x; uniformData[17] = executor.cursor.y; uniformData[18] = executor.cursor.z;
+        uniformData[19] = 0; // Never show cursor in viewer mode
+        device.queue.writeBuffer(uniformBuf, 0, uniformData);
+
+        const planes = extractFrustumPlanes(cam.vp);
+        const cullData = new ArrayBuffer(112);
+        const cullF32 = new Float32Array(cullData);
+        const cullU32 = new Uint32Array(cullData);
+        cullF32.set(planes, 0);
+        cullU32[24] = n;
+        device.queue.writeBuffer(cullUniformBuf, 0, cullData);
+        device.queue.writeBuffer(indirectBuf, 0, indirectReset);
+
+        const enc = device.createCommandEncoder();
+        if (n > 0) {
+            const cp = enc.beginComputePass();
+            cp.setPipeline(cullPipeline);
+            cp.setBindGroup(0, cullBG);
+            cp.dispatchWorkgroups(ceil(n / 256));
+            cp.end();
+        }
+
+        const tv = ctx.getCurrentTexture().createView();
+        const rp = enc.beginRenderPass({
+            colorAttachments: [{
+                view: msaaTex.createView(), resolveTarget: tv,
+                clearValue: { r:0.035, g:0.035, b:0.05, a:1 },
+                loadOp:'clear', storeOp:'discard',
+            }],
+            depthStencilAttachment: { view: depthTex.createView(), depthClearValue: 1, depthLoadOp:'clear', depthStoreOp:'discard' },
+        });
+
+        if (n > 0) {
+            rp.setPipeline(framePipeline);
+            rp.setBindGroup(0, renderBG);
+            rp.setVertexBuffer(0, frameVB);
+            rp.setIndexBuffer(frameIB, 'uint16');
+            rp.drawIndexedIndirect(indirectBuf, 0);
+        }
+        // No cursor drawing in viewer mode
+        rp.end();
+        device.queue.submit([enc.finish()]);
+    }
+
+    requestAnimationFrame(frame);
+}
+
+main().catch(e => {
+    console.error(e);
+    const el = document.getElementById('error-msg');
+    if (el) { el.style.display='block'; el.textContent=e.message; }
+});

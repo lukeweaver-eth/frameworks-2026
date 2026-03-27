@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Frameworks V4 — Viewer Test</title>
+<style>
+/* Simulates fullSizeCanvas.css from EthFS */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0c; overflow: hidden; }
+canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<!--
+  This test file simulates the on-chain HTML assembly by ScriptyBuilder:
+  1. Set the autoExecuteCommand global (injected by renderer contract)
+  2. Load the viewer script (would be gzipped from EthFS in production)
+
+  Change the command string below to test different compositions.
+-->
+<script>
+// === SIMULATED RENDERER INJECTION ===
+// This is what the Solidity contract injects as bodyTags[0]:
+//   let autoExecuteCommand = 'fp5fpp2fppp';
+// Try different commands:
+//   'f'                          — single frame
+//   'fp5fpp2fppp'               — color walk
+//   'f(dR,8)'                   — 8 rotated duplicates
+//   '(f,10)'                    — 10 frames in a row
+//   'fdtilf(dR,4)dtilf(dR,8)'  — nested structure
+let autoExecuteCommand = 'fdtilf(dR,4)dtilf(dR,8)';
+</script>
+
+<!-- In production this is loaded from EthFS as a gzipped base64 data URI -->
+<script src="frameworks-v4-viewer.js"></script>
+</body>
+</html>

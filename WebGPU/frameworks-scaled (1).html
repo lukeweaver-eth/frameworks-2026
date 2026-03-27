@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Frameworks – WebGPU Renderer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0c; overflow: hidden; font-family: 'SF Mono', 'Fira Code', monospace; }
+canvas { display: block; width: 100vw; height: 100vh; }
+#hud {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  pointer-events: none; color: #8888aa; font-size: 11px; line-height: 1.6;
+}
+#hud.hidden * { display: none !important; }
+#hud.hidden #mode-display { display: block !important; }
+#mode-display {
+  position: absolute; top: 12px; left: 12px;
+  background: rgba(10,10,14,0.85); padding: 6px 12px; border: 1px solid #333;
+}
+.mode { color: #ddd; font-size: 13px; font-weight: bold; }
+#info-display {
+  position: absolute; bottom: 12px; left: 12px;
+  background: rgba(10,10,14,0.85); padding: 6px 12px; border: 1px solid #333;
+}
+#perf-display {
+  position: absolute; bottom: 12px; right: 12px;
+  background: rgba(10,10,14,0.85); padding: 6px 12px; border: 1px solid #333;
+}
+#spawn-controls {
+  position: absolute; top: 12px; right: 12px;
+  background: rgba(10,10,14,0.85); padding: 8px 12px; border: 1px solid #333;
+  pointer-events: all;
+}
+#spawn-controls button {
+  background: #333; color: #ccc; border: 1px solid #555; padding: 4px 10px;
+  font-family: inherit; font-size: 11px; cursor: pointer; margin: 2px;
+}
+#spawn-controls button:hover { background: #555; }
+#palette-overlay {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: rgba(10,10,14,0.95); border: 1px solid #555; padding: 12px;
+  display: none;
+}
+#palette-overlay.active { display: block; }
+#palette-grid { display: grid; grid-template-columns: repeat(10, 24px); gap: 2px; }
+.pc { width: 24px; height: 24px; border: 2px solid transparent; }
+.pc.sel { border-color: #fff; }
+#error-msg {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  color: #ff6666; font-size: 16px; text-align: center; display: none;
+}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="hud">
+  <div id="mode-display">
+    <div class="mode" id="mode-text">NORMAL</div>
+    <div id="view-text">View: 0 Spatial</div>
+  </div>
+  <div id="info-display">
+    <div id="cursor-text">Cursor: 0, 0, 0</div>
+    <div id="selection-text">Sel: 0 / 0</div>
+  </div>
+  <div id="perf-display">
+    <div id="fps-text">FPS: --</div>
+    <div id="draw-text">Visible: -- / --</div>
+  </div>
+  <div id="spawn-controls">
+    <div style="color:#999;margin-bottom:4px;">Spawn</div>
+    <button data-n="1000">+1K</button>
+    <button data-n="10000">+10K</button>
+    <button data-n="100000">+100K</button>
+    <button data-n="500000">+500K</button>
+    <button data-n="1000000">+1M</button>
+    <button id="btn-clear">Clear</button>
+  </div>
+  <div id="palette-overlay"><div id="palette-grid"></div></div>
+</div>
+<div id="error-msg"></div>
+
+<script>
+// ============================================================
+// CONSTANTS
+// ============================================================
+const MAX_INSTANCES = 2_097_152; // 2^21
+const INSTANCE_STRIDE = 48;     // bytes per instance (12 x f32)
+const GRID_STEP = 1.0;
+const SCALE_FACTOR = 1.1;
+
+// ============================================================
+// MATH
+// ============================================================
+const { PI, sin, cos, tan, sqrt, abs, max, min, floor, ceil, random } = Math;
+function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+function mat4Perspective(out, fov, aspect, near, far) {
+  const f = 1 / tan(fov / 2), nf = 1 / (near - far);
+  out[0]=f/aspect; out[1]=0; out[2]=0; out[3]=0;
+  out[4]=0; out[5]=f; out[6]=0; out[7]=0;
+  out[8]=0; out[9]=0; out[10]=(far+near)*nf; out[11]=-1;
+  out[12]=0; out[13]=0; out[14]=2*far*near*nf; out[15]=0;
+}
+function mat4LookAt(out, eye, tgt, up) {
+  let zx=eye[0]-tgt[0], zy=eye[1]-tgt[1], zz=eye[2]-tgt[2];
+  let len=sqrt(zx*zx+zy*zy+zz*zz);
+  if(len>0){zx/=len;zy/=len;zz/=len;}
+  let xx=up[1]*zz-up[2]*zy, xy=up[2]*zx-up[0]*zz, xz=up[0]*zy-up[1]*zx;
+  len=sqrt(xx*xx+xy*xy+xz*xz);
+  if(len>0){xx/=len;xy/=len;xz/=len;}
+  const yx=zy*xz-zz*xy, yy=zz*xx-zx*xz, yz=zx*xy-zy*xx;
+  out[0]=xx; out[1]=yx; out[2]=zx; out[3]=0;
+  out[4]=xy; out[5]=yy; out[6]=zy; out[7]=0;
+  out[8]=xz; out[9]=yz; out[10]=zz; out[11]=0;
+  out[12]=-(xx*eye[0]+xy*eye[1]+xz*eye[2]);
+  out[13]=-(yx*eye[0]+yy*eye[1]+yz*eye[2]);
+  out[14]=-(zx*eye[0]+zy*eye[1]+zz*eye[2]);
+  out[15]=1;
+}
+function mat4Mul(out, a, b) {
+  for(let i=0;i<4;i++) for(let j=0;j<4;j++)
+    out[j*4+i]=a[i]*b[j*4]+a[4+i]*b[j*4+1]+a[8+i]*b[j*4+2]+a[12+i]*b[j*4+3];
+}
+function quatFromAxisAngle(ax, ang) {
+  const h=ang*0.5, s=sin(h), c=cos(h);
+  return [ax[0]*s, ax[1]*s, ax[2]*s, c];
+}
+function quatMul(a, b) {
+  return [
+    a[3]*b[0]+a[0]*b[3]+a[1]*b[2]-a[2]*b[1],
+    a[3]*b[1]-a[0]*b[2]+a[1]*b[3]+a[2]*b[0],
+    a[3]*b[2]+a[0]*b[1]-a[1]*b[0]+a[2]*b[3],
+    a[3]*b[3]-a[0]*b[0]-a[1]*b[1]-a[2]*b[2],
+  ];
+}
+function quatRotVec(q, v) {
+  const [ux,uy,uz]=q, s=q[3];
+  const d=ux*v[0]+uy*v[1]+uz*v[2], dd=ux*ux+uy*uy+uz*uz;
+  const cx=uy*v[2]-uz*v[1], cy=uz*v[0]-ux*v[2], cz=ux*v[1]-uy*v[0];
+  return [2*d*ux+(s*s-dd)*v[0]+2*s*cx, 2*d*uy+(s*s-dd)*v[1]+2*s*cy, 2*d*uz+(s*s-dd)*v[2]+2*s*cz];
+}
+
+// ============================================================
+// 80-COLOR PALETTE (generate for now — swap in eightycolors)
+// ============================================================
+function buildPalette() {
+  const c = new Float32Array(80 * 4);
+  for (let i = 0; i < 80; i++) {
+    const h = (i * 4.5) % 360, s = (60 + (i%3)*15)/100, l = (35 + (i%4)*12)/100;
+    const a2 = s * min(l, 1-l);
+    const f = n => { const k=(n+h/30)%12; return l - a2*max(min(k-3,9-k,1),-1); };
+    c[i*4]=f(0); c[i*4+1]=f(8); c[i*4+2]=f(4); c[i*4+3]=1;
+  }
+  return c;
+}
+const PALETTE_DATA = buildPalette();
+
+// ============================================================
+// VIEW PLANES
+// ============================================================
+const VP = [
+  { name:'Spatial',  i:[0,1,0], k:[0,-1,0], j:[-1,0,0], l:[1,0,0],  n:[0,0,1] },
+  { name:'Front',    i:[0,1,0], k:[0,-1,0], j:[-1,0,0], l:[1,0,0],  n:[0,0,1] },
+  { name:'Right',    i:[0,1,0], k:[0,-1,0], j:[0,0,1],  l:[0,0,-1], n:[-1,0,0] },
+  { name:'Back',     i:[0,1,0], k:[0,-1,0], j:[1,0,0],  l:[-1,0,0], n:[0,0,-1] },
+  { name:'Left',     i:[0,1,0], k:[0,-1,0], j:[0,0,-1], l:[0,0,1],  n:[1,0,0] },
+  { name:'Top',      i:[0,0,-1],k:[0,0,1],  j:[-1,0,0], l:[1,0,0],  n:[0,1,0] },
+  { name:'Bottom',   i:[0,0,1], k:[0,0,-1], j:[-1,0,0], l:[1,0,0],  n:[0,-1,0] },
+];
+
+// ============================================================
+// FRAME GEOMETRY: 4 crosshatch lines as thin quads
+// ============================================================
+function buildFrameGeo() {
+  const lines = [
+    [-0.625, 0.5, 0.625, 0.5],
+    [-0.625,-0.5, 0.625,-0.5],
+    [-0.5,-0.625,-0.5, 0.625],
+    [ 0.5,-0.625, 0.5, 0.625],
+  ];
+  const hw = 0.018;
+  const v = [], ix = [];
+  for (let i = 0; i < 4; i++) {
+    const [sx,sy,ex,ey] = lines[i];
+    const dx=ex-sx, dy=ey-sy, len=sqrt(dx*dx+dy*dy);
+    const nx=(-dy/len)*hw, ny=(dx/len)*hw;
+    const b = i * 4;
+    v.push(sx+nx,sy+ny,0, sx-nx,sy-ny,0, ex+nx,ey+ny,0, ex-nx,ey-ny,0);
+    ix.push(b,b+1,b+2, b+2,b+1,b+3);
+  }
+  return { verts: new Float32Array(v), idx: new Uint16Array(ix) };
+}
+
+// Cursor: 3-axis crosshair
+function buildCursorGeo() {
+  const s=1.0, w=0.06;
+  const axes = [[[-s,0,0],[s,0,0],[0,w,0]], [[0,-s,0],[0,s,0],[w,0,0]], [[0,0,-s],[0,0,s],[0,w,0]]];
+  const v=[], ix=[];
+  for(let i=0;i<3;i++){
+    const [a,b,n]=axes[i], base=i*4;
+    v.push(a[0]+n[0],a[1]+n[1],a[2]+n[2], a[0]-n[0],a[1]-n[1],a[2]-n[2],
+           b[0]+n[0],b[1]+n[1],b[2]+n[2], b[0]-n[0],b[1]-n[1],b[2]-n[2]);
+    ix.push(base,base+1,base+2, base+2,base+1,base+3);
+  }
+  return { verts: new Float32Array(v), idx: new Uint16Array(ix) };
+}
+
+// ============================================================
+// SHADERS
+// ============================================================
+
+const RENDER_SHADER = `
+struct Uniforms {
+  viewProj: mat4x4<f32>,
+  cursor: vec3<f32>,
+  showCursor: f32,
+};
+
+struct Instance {
+  px: f32, py: f32, pz: f32, scale: f32,
+  qx: f32, qy: f32, qz: f32, qw: f32,
+  colorIdx: u32, flags: u32, _p0: u32, _p1: u32,
+};
+
+@group(0) @binding(0) var<uniform> u: Uniforms;
+@group(0) @binding(1) var<storage, read> visible: array<u32>;
+@group(0) @binding(2) var<storage, read> instances: array<Instance>;
+@group(0) @binding(3) var<storage, read> palette: array<vec4<f32>>;
+
+struct V2F { @builtin(position) pos: vec4<f32>, @location(0) col: vec4<f32> };
+
+fn qrot(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+  let u2 = q.xyz;
+  let s2 = q.w;
+  return 2.0*dot(u2,v)*u2 + (s2*s2-dot(u2,u2))*v + 2.0*s2*cross(u2,v);
+}
+
+@vertex fn vs_frame(@location(0) lp: vec3<f32>, @builtin(instance_index) ii: u32) -> V2F {
+  let idx = visible[ii];
+  let inst = instances[idx];
+  var p = lp * inst.scale;
+  let q = vec4<f32>(inst.qx, inst.qy, inst.qz, inst.qw);
+  p = qrot(q, p);
+  p += vec3<f32>(inst.px, inst.py, inst.pz);
+  var o: V2F;
+  o.pos = u.viewProj * vec4<f32>(p, 1.0);
+  var c = palette[inst.colorIdx % 80u];
+  if ((inst.flags & 1u) != 0u) { c = mix(c, vec4<f32>(1.0,1.0,1.0,1.0), 0.4); }
+  o.col = c;
+  return o;
+}
+
+@fragment fn fs_frame(v: V2F) -> @location(0) vec4<f32> { return v.col; }
+
+// Cursor pass (reuses same bind group, instance 0 unused)
+@vertex fn vs_cursor(@location(0) lp: vec3<f32>) -> V2F {
+  var p = lp * 0.15 + u.cursor;
+  var o: V2F;
+  o.pos = u.viewProj * vec4<f32>(p, 1.0);
+  o.col = vec4<f32>(1.0, 1.0, 1.0, 0.7);
+  if (u.showCursor < 0.5) { o.pos = vec4<f32>(0.0, 0.0, -2.0, 1.0); }
+  return o;
+}
+@fragment fn fs_cursor(v: V2F) -> @location(0) vec4<f32> { return v.col; }
+`;
+
+// Compute shader: frustum cull + build visible index list + indirect args
+const CULL_SHADER = `
+struct CullUniforms {
+  planes: array<vec4<f32>, 6>,  // frustum planes (nx,ny,nz,d)
+  totalInstances: u32,
+};
+
+struct Instance {
+  px: f32, py: f32, pz: f32, scale: f32,
+  qx: f32, qy: f32, qz: f32, qw: f32,
+  colorIdx: u32, flags: u32, _p0: u32, _p1: u32,
+};
+
+struct IndirectArgs {
+  indexCount: u32,
+  instanceCount: atomic<u32>,
+  firstIndex: u32,
+  baseVertex: u32,
+  firstInstance: u32,
+};
+
+@group(0) @binding(0) var<uniform> cu: CullUniforms;
+@group(0) @binding(1) var<storage, read> instances: array<Instance>;
+@group(0) @binding(2) var<storage, read_write> visible: array<u32>;
+@group(0) @binding(3) var<storage, read_write> indirect: IndirectArgs;
+
+@compute @workgroup_size(256)
+fn cull_main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x;
+  if (i >= cu.totalInstances) { return; }
+
+  let inst = instances[i];
+  let pos = vec3<f32>(inst.px, inst.py, inst.pz);
+  let radius = inst.scale * 0.9; // bounding sphere radius of frame
+
+  // Test against 6 frustum planes
+  var inside = true;
+  for (var p = 0u; p < 6u; p++) {
+    let plane = cu.planes[p];
+    let dist = dot(plane.xyz, pos) + plane.w;
+    if (dist < -radius) {
+      inside = false;
+      break;
+    }
+  }
+
+  if (inside) {
+    let slot = atomicAdd(&indirect.instanceCount, 1u);
+    visible[slot] = i;
+  }
+}
+`;
+
+// ============================================================
+// FRUSTUM PLANE EXTRACTION (from viewProj matrix)
+// ============================================================
+function extractFrustumPlanes(vp) {
+  // vp is column-major Float32Array[16]
+  // Row vectors of the clip matrix
+  const r0 = [vp[0], vp[4], vp[8],  vp[12]]; // row 0
+  const r1 = [vp[1], vp[5], vp[9],  vp[13]]; // row 1
+  const r2 = [vp[2], vp[6], vp[10], vp[14]]; // row 2
+  const r3 = [vp[3], vp[7], vp[11], vp[15]]; // row 3
+
+  const planes = new Float32Array(24); // 6 planes * 4 floats
+  function setPlane(idx, a, b, c, d) {
+    const len = sqrt(a*a + b*b + c*c);
+    planes[idx*4]=a/len; planes[idx*4+1]=b/len; planes[idx*4+2]=c/len; planes[idx*4+3]=d/len;
+  }
+  // Left:   r3 + r0
+  setPlane(0, r3[0]+r0[0], r3[1]+r0[1], r3[2]+r0[2], r3[3]+r0[3]);
+  // Right:  r3 - r0
+  setPlane(1, r3[0]-r0[0], r3[1]-r0[1], r3[2]-r0[2], r3[3]-r0[3]);
+  // Bottom: r3 + r1
+  setPlane(2, r3[0]+r1[0], r3[1]+r1[1], r3[2]+r1[2], r3[3]+r1[3]);
+  // Top:    r3 - r1
+  setPlane(3, r3[0]-r1[0], r3[1]-r1[1], r3[2]-r1[2], r3[3]-r1[3]);
+  // Near:   r3 + r2
+  setPlane(4, r3[0]+r2[0], r3[1]+r2[1], r3[2]+r2[2], r3[3]+r2[3]);
+  // Far:    r3 - r2
+  setPlane(5, r3[0]-r2[0], r3[1]-r2[1], r3[2]-r2[2], r3[3]-r2[3]);
+  return planes;
+}
+
+// ============================================================
+// CAMERA CONTROLLER
+// ============================================================
+class Camera {
+  constructor(canvas) {
+    this.theta = PI/4; this.phi = PI/6; this.dist = 30;
+    this.target = [0, 0, 0];
+    this.eye = new Float32Array(3);
+    this.view = new Float32Array(16);
+    this.proj = new Float32Array(16);
+    this.vp = new Float32Array(16);
+    this._dirty = true;
+    this._dragging = false; this._panning = false;
+    this._lx = 0; this._ly = 0;
+
+    canvas.addEventListener('mousedown', e => {
+      if (e.button === 0 && !e.altKey) { this._dragging = true; }
+      else if (e.button === 2 || (e.button === 0 && e.altKey)) { this._panning = true; }
+      this._lx = e.clientX; this._ly = e.clientY; e.preventDefault();
+    });
+    window.addEventListener('mousemove', e => {
+      if (!this._dragging && !this._panning) return;
+      const dx = e.clientX - this._lx, dy = e.clientY - this._ly;
+      this._lx = e.clientX; this._ly = e.clientY;
+      if (this._dragging) {
+        this.theta -= dx * 0.005;
+        this.phi = clamp(this.phi + dy * 0.005, -PI/2+0.01, PI/2-0.01);
+        this._dirty = true;
+      } else {
+        const s = this.dist * 0.002;
+        const rx = -cos(this.theta), rz = sin(this.theta);
+        const ux = -sin(this.phi)*sin(this.theta), uy = cos(this.phi), uz = -sin(this.phi)*cos(this.theta);
+        this.target[0] += (-dx*rx + dy*ux)*s;
+        this.target[1] += dy*uy*s;
+        this.target[2] += (-dx*rz + dy*uz)*s;
+        this._dirty = true;
+      }
+    });
+    window.addEventListener('mouseup', () => { this._dragging = false; this._panning = false; });
+    canvas.addEventListener('wheel', e => {
+      this.dist = clamp(this.dist * (1 + e.deltaY * 0.001), 0.5, 2000);
+      this._dirty = true; e.preventDefault();
+    }, { passive: false });
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+  }
+
+  update(aspect) {
+    // Always recalculate (cheap, ensures correctness)
+    this.eye[0] = this.target[0] + this.dist * cos(this.phi) * sin(this.theta);
+    this.eye[1] = this.target[1] + this.dist * sin(this.phi);
+    this.eye[2] = this.target[2] + this.dist * cos(this.phi) * cos(this.theta);
+    mat4LookAt(this.view, this.eye, this.target, [0,1,0]);
+    mat4Perspective(this.proj, PI/4, aspect, 0.1, 2000);
+    mat4Mul(this.vp, this.proj, this.view);
+    const d = this._dirty; this._dirty = false; return d;
+  }
+
+  invalidate() { this._dirty = true; }
+}
+
+// ============================================================
+// APPLICATION STATE
+// ============================================================
+const Mode = { NORMAL:'NORMAL', TRANSLATE:'TRANSLATE', TRANSLATE_CURSOR:'TRANSLATE_CURSOR',
+  SCALE:'SCALE', SCALE_ALL:'SCALE_ALL', COLOR:'COLOR', CAMERA:'CAMERA' };
+
+class State {
+  constructor() {
+    // GPU-side instance data as typed array (SoA would be faster, but AoS is simpler for now)
+    this.capacity = 4096;
+    this.count = 0;
+    this.data = new ArrayBuffer(this.capacity * INSTANCE_STRIDE);
+    this.f32 = new Float32Array(this.data);
+    this.u32 = new Uint32Array(this.data);
+
+    this.selection = new Set();
+    this.cursor = [0, 0, 0];
+    this.viewPlane = 0;
+    this.mode = Mode.NORMAL;
+    this.colorIdx = 0;
+    this.palRow = 0; this.palCol = 0;
+    this.showUI = true;
+    this.dirty = true;        // instances changed, need re-upload
+    this.selDirty = true;     // selection flags changed
+  }
+
+  _grow(needed) {
+    while (this.capacity < needed) this.capacity *= 2;
+    const currentBufInstances = this.f32.length / (INSTANCE_STRIDE / 4);
+    if (this.capacity > currentBufInstances) {
+      const oldByteLen = this.data.byteLength;
+      const newBuf = new ArrayBuffer(this.capacity * INSTANCE_STRIDE);
+      new Uint8Array(newBuf).set(new Uint8Array(this.data, 0, oldByteLen));
+      this.data = newBuf;
+      this.f32 = new Float32Array(this.data);
+      this.u32 = new Uint32Array(this.data);
+    }
+  }
+
+  // Instance layout (48 bytes = 12 x f32):
+  // [0] px [1] py [2] pz [3] scale
+  // [4] qx [5] qy [6] qz [7] qw
+  // [8] colorIdx(u32) [9] flags(u32) [10] _pad [11] _pad
+  _off(i) { return i * 12; } // offset in f32/u32 units
+
+  addFrame(pos, colorIdx, q) {
+    const i = this.count++;
+    this._grow(this.count);
+    const o = this._off(i);
+    this.f32[o] = pos[0]; this.f32[o+1] = pos[1]; this.f32[o+2] = pos[2];
+    this.f32[o+3] = 1.0; // scale
+    if (q) { this.f32[o+4]=q[0]; this.f32[o+5]=q[1]; this.f32[o+6]=q[2]; this.f32[o+7]=q[3]; }
+    else { this.f32[o+4]=0; this.f32[o+5]=0; this.f32[o+6]=0; this.f32[o+7]=1; }
+    this.u32[o+8] = colorIdx ?? this.colorIdx;
+    this.u32[o+9] = 0;
+    this.dirty = true;
+    return i;
+  }
+
+  addBulk(positions, colorFn) {
+    // Fast path for spawning thousands
+    const start = this.count;
+    const n = positions.length;
+    this.count += n;
+    this._grow(this.count);
+    for (let i = 0; i < n; i++) {
+      const o = this._off(start + i);
+      this.f32[o] = positions[i][0]; this.f32[o+1] = positions[i][1]; this.f32[o+2] = positions[i][2];
+      this.f32[o+3] = 1.0;
+      this.f32[o+4]=0; this.f32[o+5]=0; this.f32[o+6]=0; this.f32[o+7]=1;
+      this.u32[o+8] = colorFn ? colorFn(i) : (i % 80);
+      this.u32[o+9] = 0;
+    }
+    this.dirty = true;
+  }
+
+  clear() {
+    this.count = 0; this.selection.clear(); this.dirty = true; this.selDirty = true;
+  }
+
+  getPos(i) { const o=this._off(i); return [this.f32[o],this.f32[o+1],this.f32[o+2]]; }
+  setPos(i, p) { const o=this._off(i); this.f32[o]=p[0]; this.f32[o+1]=p[1]; this.f32[o+2]=p[2]; this.dirty=true; }
+  getScale(i) { return this.f32[this._off(i)+3]; }
+  setScale(i, s) { this.f32[this._off(i)+3]=s; this.dirty=true; }
+  getQuat(i) { const o=this._off(i); return [this.f32[o+4],this.f32[o+5],this.f32[o+6],this.f32[o+7]]; }
+  setQuat(i, q) { const o=this._off(i); this.f32[o+4]=q[0];this.f32[o+5]=q[1];this.f32[o+6]=q[2];this.f32[o+7]=q[3]; this.dirty=true; }
+  getColor(i) { return this.u32[this._off(i)+8]; }
+  setColor(i, c) { this.u32[this._off(i)+8]=c; this.dirty=true; }
+  setFlag(i, flag, on) {
+    const o=this._off(i)+9;
+    if(on) this.u32[o]|=flag; else this.u32[o]&=~flag;
+  }
+
+  syncSelectionFlags() {
+    // Batch-write selection bit into flags
+    for (let i = 0; i < this.count; i++) {
+      this.setFlag(i, 1, this.selection.has(i));
+    }
+    this.dirty = true;
+    this.selDirty = false;
+  }
+
+  // === COMMANDS ===
+
+  cmdNewFrame() {
+    let q = null;
+    const vp = this.viewPlane;
+    if (vp===2||vp===4) q = quatFromAxisAngle([0,1,0], PI/2);
+    else if (vp===5||vp===6) q = quatFromAxisAngle([1,0,0], PI/2);
+    const idx = this.addFrame([...this.cursor], this.colorIdx, q);
+    this.selection.clear(); this.selection.add(idx);
+    this.selDirty = true;
+  }
+
+  cmdDelete() {
+    if (!this.selection.size) return;
+    // Compact: swap-remove is faster but changes indices. Stable remove for correctness.
+    const keep = new Uint8Array(this.count);
+    for (let i = 0; i < this.count; i++) keep[i] = this.selection.has(i) ? 0 : 1;
+    let dst = 0;
+    for (let src = 0; src < this.count; src++) {
+      if (keep[src]) {
+        if (dst !== src) {
+          const so = this._off(src), do2 = this._off(dst);
+          for (let j = 0; j < 12; j++) this.u32[do2+j] = this.u32[so+j];
+        }
+        dst++;
+      }
+    }
+    this.count = dst;
+    this.selection.clear();
+    this.dirty = true; this.selDirty = true;
+  }
+
+  cmdDuplicate() {
+    const sel = [...this.selection];
+    const newSel = [];
+    for (const si of sel) {
+      const o = this._off(si);
+      const ni = this.count++;
+      this._grow(this.count);
+      const no = this._off(ni);
+      for (let j = 0; j < 12; j++) this.u32[no+j] = this.u32[o+j];
+      newSel.push(ni);
+    }
+    this.selection.clear();
+    for (const i of newSel) this.selection.add(i);
+    this.dirty = true; this.selDirty = true;
+  }
+
+  cmdTranslate(dirKey) {
+    const ax = VP[this.viewPlane][dirKey]; if (!ax) return;
+    for (const i of this.selection) {
+      const o = this._off(i);
+      this.f32[o] += ax[0]; this.f32[o+1] += ax[1]; this.f32[o+2] += ax[2];
+    }
+    this.dirty = true;
+  }
+
+  cmdTranslateCursor(dirKey) {
+    const ax = VP[this.viewPlane][dirKey]; if (!ax) return;
+    this.cursor[0]+=ax[0]; this.cursor[1]+=ax[1]; this.cursor[2]+=ax[2];
+  }
+
+  cmdScale(up) {
+    const f = up ? 1.1 : 1/1.1;
+    for (const i of this.selection) this.f32[this._off(i)+3] *= f;
+    this.dirty = true;
+  }
+
+  cmdScaleAll(up) {
+    if (!this.selection.size) return;
+    const f = up ? 1.1 : 1/1.1;
+    let cx=0,cy=0,cz=0;
+    for(const i of this.selection) { const o=this._off(i); cx+=this.f32[o]; cy+=this.f32[o+1]; cz+=this.f32[o+2]; }
+    const n=this.selection.size; cx/=n; cy/=n; cz/=n;
+    for(const i of this.selection) {
+      const o=this._off(i);
+      this.f32[o] = cx+(this.f32[o]-cx)*f;
+      this.f32[o+1] = cy+(this.f32[o+1]-cy)*f;
+      this.f32[o+2] = cz+(this.f32[o+2]-cz)*f;
+      this.f32[o+3] *= f;
+    }
+    this.dirty = true;
+  }
+
+  cmdRotate(angle) {
+    if (!this.selection.size) return;
+    const normal = VP[this.viewPlane].n;
+    const q = quatFromAxisAngle(normal, angle);
+    const pv = this.cursor;
+    for (const i of this.selection) {
+      const o = this._off(i);
+      let rel = [this.f32[o]-pv[0], this.f32[o+1]-pv[1], this.f32[o+2]-pv[2]];
+      rel = quatRotVec(q, rel);
+      this.f32[o]=pv[0]+rel[0]; this.f32[o+1]=pv[1]+rel[1]; this.f32[o+2]=pv[2]+rel[2];
+      const fq = quatMul(q, [this.f32[o+4],this.f32[o+5],this.f32[o+6],this.f32[o+7]]);
+      this.f32[o+4]=fq[0]; this.f32[o+5]=fq[1]; this.f32[o+6]=fq[2]; this.f32[o+7]=fq[3];
+    }
+    this.dirty = true;
+  }
+
+  cmdReflect(horiz) {
+    if (!this.selection.size) return;
+    const ax = horiz ? VP[this.viewPlane].l : VP[this.viewPlane].i;
+    const pv = this.cursor;
+    for (const i of this.selection) {
+      const o = this._off(i);
+      const rx=this.f32[o]-pv[0], ry=this.f32[o+1]-pv[1], rz=this.f32[o+2]-pv[2];
+      const dot = rx*ax[0]+ry*ax[1]+rz*ax[2];
+      this.f32[o]=pv[0]+rx-2*dot*ax[0]; this.f32[o+1]=pv[1]+ry-2*dot*ax[1]; this.f32[o+2]=pv[2]+rz-2*dot*ax[2];
+    }
+    this.dirty = true;
+  }
+
+  cmdSelectSameColor() {
+    if (!this.selection.size) return;
+    const c = this.u32[this._off([...this.selection][0])+8];
+    for (let i=0;i<this.count;i++) if(this.u32[this._off(i)+8]===c) this.selection.add(i);
+    this.selDirty = true;
+  }
+
+  cmdSelectAll() {
+    for(let i=0;i<this.count;i++) this.selection.add(i);
+    this.selDirty = true;
+  }
+
+  cmdSnapCursor() { this.cursor=[0,0,0]; }
+
+  cmdSnapSelToCursor() {
+    if(!this.selection.size) return;
+    let cx=0,cy=0,cz=0;
+    for(const i of this.selection){const o=this._off(i); cx+=this.f32[o];cy+=this.f32[o+1];cz+=this.f32[o+2];}
+    const n=this.selection.size; cx/=n;cy/=n;cz/=n;
+    const dx=this.cursor[0]-cx, dy=this.cursor[1]-cy, dz=this.cursor[2]-cz;
+    for(const i of this.selection){const o=this._off(i); this.f32[o]+=dx;this.f32[o+1]+=dy;this.f32[o+2]+=dz;}
+    this.dirty = true;
+  }
+
+  cmdCenterToCursor() {
+    if(!this.count) return;
+    let cx=0,cy=0,cz=0;
+    for(let i=0;i<this.count;i++){const o=this._off(i); cx+=this.f32[o];cy+=this.f32[o+1];cz+=this.f32[o+2];}
+    cx/=this.count;cy/=this.count;cz/=this.count;
+    const dx=this.cursor[0]-cx, dy=this.cursor[1]-cy, dz=this.cursor[2]-cz;
+    for(let i=0;i<this.count;i++){const o=this._off(i); this.f32[o]+=dx;this.f32[o+1]+=dy;this.f32[o+2]+=dz;}
+    this.dirty = true;
+  }
+
+  cmdApplyColor() {
+    this.colorIdx = this.palRow * 10 + this.palCol;
+    for (const i of this.selection) this.u32[this._off(i)+8] = this.colorIdx;
+    this.dirty = true;
+  }
+}
+
+// ============================================================
+// WEBGPU INIT
+// ============================================================
+async function main() {
+  const canvas = document.getElementById('canvas');
+  const errEl = document.getElementById('error-msg');
+
+  if (!navigator.gpu) { errEl.style.display='block'; errEl.textContent='WebGPU not supported. Use Chrome 113+.'; return; }
+  const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+  if (!adapter) { errEl.style.display='block'; errEl.textContent='No WebGPU adapter.'; return; }
+
+  const limits = adapter.limits;
+  const device = await adapter.requestDevice({
+    requiredLimits: {
+      maxStorageBufferBindingSize: min(MAX_INSTANCES * INSTANCE_STRIDE, limits.maxStorageBufferBindingSize),
+      maxBufferSize: min(MAX_INSTANCES * INSTANCE_STRIDE, limits.maxBufferSize),
+      maxComputeWorkgroupsPerDimension: limits.maxComputeWorkgroupsPerDimension,
+    },
+  });
+
+  const ctx = canvas.getContext('webgpu');
+  const fmt = navigator.gpu.getPreferredCanvasFormat();
+  ctx.configure({ device, format: fmt, alphaMode: 'opaque' });
+
+  // ---- Geometry buffers ----
+  const frameGeo = buildFrameGeo();
+  const frameVB = device.createBuffer({ size: frameGeo.verts.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(frameVB, 0, frameGeo.verts);
+  const frameIB = device.createBuffer({ size: frameGeo.idx.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(frameIB, 0, frameGeo.idx);
+  const frameIdxCount = frameGeo.idx.length;
+
+  const curGeo = buildCursorGeo();
+  const curVB = device.createBuffer({ size: curGeo.verts.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(curVB, 0, curGeo.verts);
+  const curIB = device.createBuffer({ size: curGeo.idx.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(curIB, 0, curGeo.idx);
+  const curIdxCount = curGeo.idx.length;
+
+  // ---- GPU Buffers ----
+  const maxBytes = MAX_INSTANCES * INSTANCE_STRIDE;
+
+  // Instance storage (read by compute + render)
+  const instanceBuf = device.createBuffer({ size: maxBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+
+  // Visible index list (written by compute, read by render vertex shader)
+  const visibleBuf = device.createBuffer({ size: MAX_INSTANCES * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+
+  // Indirect draw args: [indexCount, instanceCount, firstIndex, baseVertex, firstInstance]
+  const indirectBuf = device.createBuffer({ size: 20, usage: GPUBufferUsage.INDIRECT | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+
+  // Palette
+  const paletteBuf = device.createBuffer({ size: PALETTE_DATA.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(paletteBuf, 0, PALETTE_DATA);
+
+  // Uniforms (render): viewProj(64) + cursor(12) + showCursor(4) = 80 bytes
+  const uniformBuf = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
+  // Cull uniforms: 6 planes * vec4(16) + totalInstances(4) + pad(12) = 112 bytes
+  const cullUniformBuf = device.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+
+  // Readback buffer for indirect (to display visible count)
+  const readbackBuf = device.createBuffer({ size: 20, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+
+  // ---- Pipelines ----
+  const renderShader = device.createShaderModule({ code: RENDER_SHADER });
+  const cullShader = device.createShaderModule({ code: CULL_SHADER });
+
+  // Render bind group layout
+  const renderBGL = device.createBindGroupLayout({ entries: [
+    { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
+    { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },  // visible
+    { binding: 2, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },  // instances
+    { binding: 3, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },  // palette
+  ]});
+
+  const renderBG = device.createBindGroup({ layout: renderBGL, entries: [
+    { binding: 0, resource: { buffer: uniformBuf } },
+    { binding: 1, resource: { buffer: visibleBuf } },
+    { binding: 2, resource: { buffer: instanceBuf } },
+    { binding: 3, resource: { buffer: paletteBuf } },
+  ]});
+
+  const vbl = { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] };
+  const depthFormat = 'depth24plus';
+
+  const SAMPLE_COUNT = 4;
+
+  const framePipeline = device.createRenderPipeline({
+    layout: device.createPipelineLayout({ bindGroupLayouts: [renderBGL] }),
+    vertex: { module: renderShader, entryPoint: 'vs_frame', buffers: [vbl] },
+    fragment: { module: renderShader, entryPoint: 'fs_frame', targets: [{ format: fmt }] },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    depthStencil: { format: depthFormat, depthWriteEnabled: true, depthCompare: 'less' },
+    multisample: { count: SAMPLE_COUNT },
+  });
+
+  const cursorPipeline = device.createRenderPipeline({
+    layout: device.createPipelineLayout({ bindGroupLayouts: [renderBGL] }),
+    vertex: { module: renderShader, entryPoint: 'vs_cursor', buffers: [vbl] },
+    fragment: { module: renderShader, entryPoint: 'fs_cursor', targets: [{ format: fmt }] },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    depthStencil: { format: depthFormat, depthWriteEnabled: true, depthCompare: 'less' },
+    multisample: { count: SAMPLE_COUNT },
+  });
+
+  // Cull compute
+  const cullBGL = device.createBindGroupLayout({ entries: [
+    { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+    { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },  // instances
+    { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },             // visible (write)
+    { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },             // indirect (write)
+  ]});
+
+  const cullBG = device.createBindGroup({ layout: cullBGL, entries: [
+    { binding: 0, resource: { buffer: cullUniformBuf } },
+    { binding: 1, resource: { buffer: instanceBuf } },
+    { binding: 2, resource: { buffer: visibleBuf } },
+    { binding: 3, resource: { buffer: indirectBuf } },
+  ]});
+
+  const cullPipeline = device.createComputePipeline({
+    layout: device.createPipelineLayout({ bindGroupLayouts: [cullBGL] }),
+    compute: { module: cullShader, entryPoint: 'cull_main' },
+  });
+
+  // ---- Depth + MSAA textures ----
+  let depthTex, msaaTex;
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvas.clientWidth * dpr;
+    canvas.height = canvas.clientHeight * dpr;
+    if (depthTex) depthTex.destroy();
+    if (msaaTex) msaaTex.destroy();
+    depthTex = device.createTexture({ size: [canvas.width, canvas.height], format: depthFormat, sampleCount: SAMPLE_COUNT, usage: GPUTextureUsage.RENDER_ATTACHMENT });
+    msaaTex = device.createTexture({ size: [canvas.width, canvas.height], format: fmt, sampleCount: SAMPLE_COUNT, usage: GPUTextureUsage.RENDER_ATTACHMENT });
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  // ---- App state ----
+  const state = new State();
+  const cam = new Camera(canvas);
+
+  // Seed demo
+  {
+    const positions = [];
+    for (let x=-5;x<=5;x++) for(let y=-5;y<=5;y++) positions.push([x*1.2, y*1.2, 0]);
+    state.addBulk(positions, i => ((i*7)%80));
+  }
+
+  // ---- Spawn buttons ----
+  function spawnN(n) {
+    const positions = [];
+    const spread = Math.cbrt(n) * 1.5;
+    for (let i = 0; i < n; i++) {
+      positions.push([
+        (random()-0.5) * spread,
+        (random()-0.5) * spread,
+        (random()-0.5) * spread,
+      ]);
+    }
+    state.addBulk(positions, i => floor(random()*80));
+  }
+
+  document.querySelectorAll('#spawn-controls button[data-n]').forEach(btn => {
+    btn.addEventListener('click', () => spawnN(parseInt(btn.dataset.n)));
+  });
+  document.getElementById('btn-clear').addEventListener('click', () => state.clear());
+
+  // ---- Input ----
+  window.addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey) return;
+    const k = e.key;
+
+    if (k === 'Escape') { state.mode = Mode.NORMAL; return; }
+
+    if (state.mode === Mode.COLOR) {
+      if(k==='i') state.palRow = max(0, state.palRow-1);
+      else if(k==='k') state.palRow = min(7, state.palRow+1);
+      else if(k==='j') state.palCol = max(0, state.palCol-1);
+      else if(k==='l') state.palCol = min(9, state.palCol+1);
+      else if(k==='p') { state.cmdApplyColor(); state.mode = Mode.NORMAL; }
+      state.colorIdx = state.palRow*10+state.palCol;
+      return;
+    }
+
+    if (state.mode === Mode.TRANSLATE || state.mode === Mode.TRANSLATE_CURSOR ||
+        state.mode === Mode.SCALE || state.mode === Mode.SCALE_ALL) {
+      if ('ijkl'.includes(k)) {
+        if (state.mode===Mode.TRANSLATE) state.cmdTranslate(k);
+        else if (state.mode===Mode.TRANSLATE_CURSOR) state.cmdTranslateCursor(k);
+        else if (state.mode===Mode.SCALE) { if(k==='i') state.cmdScale(true); else if(k==='k') state.cmdScale(false); }
+        else if (state.mode===Mode.SCALE_ALL) { if(k==='i') state.cmdScaleAll(true); else if(k==='k') state.cmdScaleAll(false); }
+      }
+      return;
+    }
+
+    // NORMAL mode
+    switch(k) {
+      case 'f': state.cmdNewFrame(); break;
+      case 'x': state.cmdDelete(); break;
+      case 'd': case 'D': state.cmdDuplicate(); break;
+      case 't': if(state.selection.size) state.mode = Mode.TRANSLATE; break;
+      case 'T': state.mode = Mode.TRANSLATE_CURSOR; break;
+      case 's': if(state.selection.size) state.mode = Mode.SCALE; break;
+      case 'S': if(state.selection.size) state.mode = Mode.SCALE_ALL; break;
+      case 'r': state.cmdRotate(PI/2); break;
+      case 'R': state.cmdRotate(PI/4); break;
+      case 'e': state.cmdReflect(true); break;
+      case 'E': state.cmdReflect(false); break;
+      case 'a': state.cmdSelectSameColor(); break;
+      case 'A': state.cmdSelectAll(); break;
+      case 'z': state.cmdSnapCursor(); break;
+      case 'Z': state.cmdCenterToCursor(); break;
+      case ' ': e.preventDefault(); state.cmdSnapSelToCursor(); break;
+      case 'p': state.mode=Mode.COLOR; state.palRow=floor(state.colorIdx/10); state.palCol=state.colorIdx%10; break;
+      case '?': state.showUI=!state.showUI; break;
+      case '0':case'1':case'2':case'3':case'4':case'5':case'6':
+        state.viewPlane=parseInt(k); break;
+    }
+  });
+
+  // ---- Render loop ----
+  let lastGPUBufSize = 0;
+  let visibleCount = 0;
+  let pendingReadback = false;
+  let fpsFrames = 0, fpsLast = performance.now(), fps = 0;
+
+  // Indirect args template: [indexCount, 0 (instanceCount reset by compute), 0, 0, 0]
+  const indirectReset = new Uint32Array([frameIdxCount, 0, 0, 0, 0]);
+
+  function frame() {
+    requestAnimationFrame(frame);
+
+    fpsFrames++;
+    const now = performance.now();
+    if (now - fpsLast > 500) { fps = (fpsFrames / (now-fpsLast) * 1000)|0; fpsFrames=0; fpsLast=now; }
+
+    const n = state.count;
+
+    // Sync selection flags if needed
+    if (state.selDirty) state.syncSelectionFlags();
+
+    // Upload instance data if dirty
+    if (state.dirty && n > 0) {
+      const bytes = n * INSTANCE_STRIDE;
+      // Grow GPU buffer if needed
+      if (bytes > lastGPUBufSize) {
+        // Can't resize; but we allocated MAX. Just track upload size.
+        lastGPUBufSize = bytes;
+      }
+      device.queue.writeBuffer(instanceBuf, 0, state.data, 0, bytes);
+      state.dirty = false;
+    }
+
+    // Camera
+    const aspect = canvas.width / canvas.height;
+    cam.update(aspect);
+
+    // Upload render uniforms
+    const uniformData = new Float32Array(20);
+    uniformData.set(cam.vp, 0);
+    uniformData[16] = state.cursor[0]; uniformData[17] = state.cursor[1]; uniformData[18] = state.cursor[2];
+    uniformData[19] = state.showUI ? 1 : 0;
+    device.queue.writeBuffer(uniformBuf, 0, uniformData);
+
+    // Upload cull uniforms
+    const planes = extractFrustumPlanes(cam.vp);
+    const cullData = new ArrayBuffer(112);
+    const cullF32 = new Float32Array(cullData);
+    const cullU32 = new Uint32Array(cullData);
+    cullF32.set(planes, 0); // 24 floats = 96 bytes
+    cullU32[24] = n;        // totalInstances at byte 96
+    device.queue.writeBuffer(cullUniformBuf, 0, cullData);
+
+    // Reset indirect args (instanceCount = 0)
+    device.queue.writeBuffer(indirectBuf, 0, indirectReset);
+
+    // === Encode ===
+    const enc = device.createCommandEncoder();
+
+    // Compute pass: cull
+    if (n > 0) {
+      const cp = enc.beginComputePass();
+      cp.setPipeline(cullPipeline);
+      cp.setBindGroup(0, cullBG);
+      cp.dispatchWorkgroups(ceil(n / 256));
+      cp.end();
+    }
+
+    // Render pass (MSAA → resolve to swap chain)
+    const tv = ctx.getCurrentTexture().createView();
+    const rp = enc.beginRenderPass({
+      colorAttachments: [{
+        view: msaaTex.createView(),
+        resolveTarget: tv,
+        clearValue: { r:0.035, g:0.035, b:0.05, a:1 },
+        loadOp:'clear', storeOp:'discard',
+      }],
+      depthStencilAttachment: { view: depthTex.createView(), depthClearValue: 1, depthLoadOp:'clear', depthStoreOp:'discard' },
+    });
+
+    if (n > 0) {
+      rp.setPipeline(framePipeline);
+      rp.setBindGroup(0, renderBG);
+      rp.setVertexBuffer(0, frameVB);
+      rp.setIndexBuffer(frameIB, 'uint16');
+      rp.drawIndexedIndirect(indirectBuf, 0);
+    }
+
+    if (state.showUI) {
+      rp.setPipeline(cursorPipeline);
+      rp.setBindGroup(0, renderBG);
+      rp.setVertexBuffer(0, curVB);
+      rp.setIndexBuffer(curIB, 'uint16');
+      rp.drawIndexed(curIdxCount, 1);
+    }
+
+    rp.end();
+
+    // Copy indirect for readback (every 30 frames to avoid stalls)
+    if (!pendingReadback && fpsFrames % 30 === 0 && n > 0) {
+      enc.copyBufferToBuffer(indirectBuf, 0, readbackBuf, 0, 20);
+      pendingReadback = true;
+    }
+
+    device.queue.submit([enc.finish()]);
+
+    // Async readback
+    if (pendingReadback) {
+      readbackBuf.mapAsync(GPUMapMode.READ).then(() => {
+        const d = new Uint32Array(readbackBuf.getMappedRange().slice(0));
+        readbackBuf.unmap();
+        visibleCount = d[1]; // instanceCount
+        pendingReadback = false;
+      }).catch(() => { pendingReadback = false; });
+    }
+
+    // HUD
+    if (state.showUI) {
+      document.getElementById('mode-text').textContent = state.mode;
+      document.getElementById('view-text').textContent = `View: ${state.viewPlane} ${VP[state.viewPlane].name}`;
+      document.getElementById('cursor-text').textContent = `Cursor: ${state.cursor.map(v=>v.toFixed(1)).join(', ')}`;
+      document.getElementById('selection-text').textContent = `Sel: ${state.selection.size} / ${n}`;
+      document.getElementById('fps-text').textContent = `FPS: ${fps}`;
+      document.getElementById('draw-text').textContent = `Visible: ${visibleCount.toLocaleString()} / ${n.toLocaleString()}`;
+    }
+    document.getElementById('hud').className = state.showUI ? '' : 'hidden';
+
+    // Palette
+    const pal = document.getElementById('palette-overlay');
+    pal.className = state.mode === Mode.COLOR ? 'active' : '';
+    if (state.mode === Mode.COLOR) updatePalette(state);
+  }
+
+  let palBuilt = false;
+  function updatePalette(s) {
+    const grid = document.getElementById('palette-grid');
+    if (!palBuilt) {
+      grid.innerHTML = '';
+      for (let i=0;i<80;i++) {
+        const d = document.createElement('div');
+        d.className = 'pc';
+        d.style.backgroundColor = `rgb(${PALETTE_DATA[i*4]*255|0},${PALETTE_DATA[i*4+1]*255|0},${PALETTE_DATA[i*4+2]*255|0})`;
+        grid.appendChild(d);
+      }
+      palBuilt = true;
+    }
+    const sel = s.palRow*10+s.palCol;
+    for (let i=0;i<grid.children.length;i++) grid.children[i].className = i===sel ? 'pc sel' : 'pc';
+  }
+
+  requestAnimationFrame(frame);
+}
+
+main().catch(e => { console.error(e); document.getElementById('error-msg').style.display='block'; document.getElementById('error-msg').textContent=e.message; });
+</script>
+</body>
+</html>

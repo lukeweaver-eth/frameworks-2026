@@ -1,0 +1,16 @@
+{
+  "name": "frameworks-v4-deploy",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "minify": "echo 'No minify step needed — HTML uploads as plain text. Run npm run upload directly.'",
+    "upload": "node script/upload-to-ethfs.mjs",
+    "register": "node script/register-renderer.mjs"
+  },
+  "dependencies": {
+    "ethers": "^6.13.4"
+  },
+  "devDependencies": {
+    "terser": "^5.31.0"
+  }
+}
