@@ -99,7 +99,8 @@ In `frameworks-v4-mint.html`, update the Collection Config defaults:
 |---------|---------------|-----------------|----------------|-------|
 | v1 | `frameworks_v4_viewer.min.js.gz` | `0xB75E76bd063DD09192e96F0F26968Aa5CB20f0F2` | 2 | Initial deploy — bounding-box camera override |
 | v2 | `frameworks_v4_viewer_v2.min.js.gz` | `0x60b164dE5efD6963e566614E7e3633396c4c0fF9` | 3 (pending registration) | Camera from command string; v/ijkl/IJKL FOV+zoom; % presentation mode |
-| v3 | `frameworks_v4_mint_v3.html` | `0xa2386b0700F93E4eEF7ecC471f841216ba9ECBa6` | 4 (pending registration) | Full mint HTML on-chain; zero viewer drift; autoExecuteCommand injection |
+| v3 | `frameworks_v4_mint_v3.html` | `0xa2386b0700F93E4eEF7ecC471f841216ba9ECBa6` | — (superseded) | Full mint HTML on-chain; zero viewer drift; autoExecuteCommand injection |
+| v4 | `frameworks_v4_mint_v4.html` | `0xE958203177Cc654d0Af06E2E23d606F274E935a2` | 4 (pending registration) | s/S scale+line rework; frame selection system; h/H hide; q corner replay fix; default scale 2; command replay headless |
 
 Collection: `0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40` (Sepolia)
 EthFS FileStore: `0xFe1411d6864592549AdE050215482e4385dFa0FB` (all networks)

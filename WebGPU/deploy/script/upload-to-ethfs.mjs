@@ -23,7 +23,7 @@ import { dirname, join } from 'path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const FILE_STORE_ADDRESS = '0xFe1411d6864592549AdE050215482e4385dFa0FB';
-const FILE_NAME = 'frameworks_v4_mint_v3.html';
+const FILE_NAME = 'frameworks_v4_mint_v4.html';
 const CHUNK_SIZE = 20000; // bytes — safely under 24KB SSTORE2 limit
 
 const FILE_STORE_ABI = [

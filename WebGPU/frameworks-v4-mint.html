@@ -77,6 +77,31 @@ canvas { display: block; width: 100vw; height: 100vh; }
   font-family: inherit; font-size: 14px; width: 300px;
 }
 
+/* w/W content overlays */
+#w-overlay, #W-overlay {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: rgba(10,10,14,0.95); border: 2px solid #555; padding: 16px;
+  display: none; pointer-events: all; min-width: 340px;
+}
+#w-overlay.active, #W-overlay.active { display: block; }
+#w-overlay label, #W-overlay label {
+  display: block; color: #999; font-size: 12px; margin-bottom: 8px;
+}
+#w-input {
+  background: #222; color: #ddd; border: 1px solid #555; padding: 8px;
+  font-family: inherit; font-size: 14px; width: 100%;
+}
+#W-input {
+  background: #222; color: #ddd; border: 1px solid #555; padding: 8px;
+  font-family: inherit; font-size: 14px; width: 100%; height: 120px; resize: vertical;
+}
+
+/* 2D label overlay canvas */
+#label-canvas {
+  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+  pointer-events: none; z-index: 1;
+}
+
 /* Mint panel */
 #mint-panel {
   position: fixed; top: 40px; right: 0; width: 340px; bottom: 0;
@@ -201,6 +226,18 @@ canvas { display: block; width: 100vw; height: 100vh; }
   <div style="color:#999;margin-bottom:8px;">Selection Input (e.g., 0,1,2 or 5:10)</div>
   <input type="text" id="bracket-input" placeholder="Enter frame IDs...">
 </div>
+
+<div id="w-overlay">
+  <label>Name (called) — Enter to apply, Escape to cancel</label>
+  <input type="text" id="w-input" placeholder="Frame name...">
+</div>
+
+<div id="W-overlay">
+  <label>Contents — Enter to apply, Shift+Enter for newline, Escape to cancel</label>
+  <textarea id="W-input" placeholder="Frame contents..."></textarea>
+</div>
+
+<canvas id="label-canvas"></canvas>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
 <script>
@@ -333,7 +370,7 @@ class FrameStore {
         this.f32[o + F.PX] = x;
         this.f32[o + F.PY] = y;
         this.f32[o + F.PZ] = z;
-        this.f32[o + F.SCALE] = scale ?? 1;
+        this.f32[o + F.SCALE] = scale ?? 2;
 
         const basis = FrameStore.basisFromNormal(nx, ny, nz);
         this.f32[o + F.RX] = basis.rx;
@@ -371,7 +408,7 @@ class FrameStore {
             this.f32[o + F.PX] = pos[0];
             this.f32[o + F.PY] = pos[1];
             this.f32[o + F.PZ] = pos[2];
-            this.f32[o + F.SCALE] = 1;
+            this.f32[o + F.SCALE] = 2;
             this.f32[o + F.RX] = basis.rx; this.f32[o + F.RY] = basis.ry; this.f32[o + F.RZ] = basis.rz;
             this.f32[o + F.UX] = basis.ux; this.f32[o + F.UY] = basis.uy; this.f32[o + F.UZ] = basis.uz;
             this.f32[o + F.NX] = norm[0];  this.f32[o + F.NY] = norm[1];  this.f32[o + F.NZ] = norm[2];
@@ -614,10 +651,19 @@ class FrameStore {
         }
     }
 
-    scaleSelectedAdd(delta) {
+    scaleSelectedAdd(delta, floor = 0.01) {
         for (let i = 0; i < this.count; i++) {
             if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) {
-                this.f32[this._o(i) + F.SCALE] = Math.max(0.01, this.f32[this._o(i) + F.SCALE] + delta);
+                this.f32[this._o(i) + F.SCALE] = Math.max(floor, this.f32[this._o(i) + F.SCALE] + delta);
+                this._markDirty(i);
+            }
+        }
+    }
+
+    scaleSelectedClamp(factor, floor = 0.01) {
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) {
+                this.f32[this._o(i) + F.SCALE] = Math.max(floor, this.f32[this._o(i) + F.SCALE] * factor);
                 this._markDirty(i);
             }
         }
@@ -682,6 +728,22 @@ class FrameStore {
     invertSelection() {
         for (let i = 0; i < this.count; i++) {
             this.u32[this._o(i) + U.FLAGS] ^= FLAG_SELECTED;
+            this._markDirty(i);
+        }
+    }
+
+    hideSelected() {
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) {
+                this.u32[this._o(i) + U.FLAGS] &= ~FLAG_VISIBLE;
+                this._markDirty(i);
+            }
+        }
+    }
+
+    showAll() {
+        for (let i = 0; i < this.count; i++) {
+            this.u32[this._o(i) + U.FLAGS] |= FLAG_VISIBLE;
             this._markDirty(i);
         }
     }
@@ -821,6 +883,22 @@ class FrameStore {
             minX, maxX, minY, maxY, minZ, maxZ,
             centerX: (minX+maxX)/2, centerY: (minY+maxY)/2, centerZ: (minZ+maxZ)/2,
         };
+    }
+
+    setCalledSelected(text) {
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) {
+                this.metadata[i].called = text;
+            }
+        }
+    }
+
+    setContentsSelected(text) {
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) {
+                this.metadata[i].contents = text;
+            }
+        }
     }
 
     selectAllOfColor() {
@@ -1453,12 +1531,53 @@ class CommandExecutor {
     // Execute a full command string
     executeCommandString(cmdString) {
         const expanded = this.expandRepeats(cmdString);
+        this.cornerIndex = 0;
         console.log(`Executing command string (${expanded.length} commands):`, expanded);
 
-        for (let i = 0; i < expanded.length; i++) {
+        // Replay mode: run through the state machine headlessly.
+        // Color, camera, and selection contexts work without DOM.
+        // Bracket input ([...]) is parsed inline without opening an overlay.
+        let i = 0;
+        while (i < expanded.length) {
             const key = expanded[i];
-            // Use executeKey to properly handle context navigation
-            this.executeKey(key, false);
+
+            // w[...] / W[...]: apply text to selected frames without opening overlay
+            if ((key === 'w' || key === 'W') && expanded[i + 1] === '[') {
+                i += 2; // skip key and [
+                let text = '';
+                while (i < expanded.length && expanded[i] !== ']') {
+                    text += expanded[i];
+                    i++;
+                }
+                this.applyWrite(key, text);
+                i++; // consume ]
+                continue;
+            }
+
+            // Bracket input: collect chars until ] then submit directly
+            if (this.selectionContext.active && key === '[') {
+                let bracketText = '';
+                i++;
+                while (i < expanded.length && expanded[i] !== ']') {
+                    bracketText += expanded[i];
+                    i++;
+                }
+                // submit without opening the DOM overlay
+                this.selectionContext.submitBracketInput(bracketText);
+                i++; // consume ]
+                continue;
+            }
+
+            if (this.colorContext.active) {
+                this.handleColorContextNavigation(key);
+            } else if (this.cameraContext.active) {
+                this.handleCameraContextNavigation(key, false);
+            } else if (this.selectionContext.active) {
+                this.handleSelectionContextNavigation(key, false);
+            } else {
+                this.executeKeyNormal(key);
+            }
+            i++;
         }
 
         this.lastCompoundCommand = cmdString;
@@ -1594,6 +1713,20 @@ class CommandExecutor {
             case 'E':
                 this.reflectSelectedV();
                 this.commandTree.addCommand(key);
+                break;
+
+            case 'h':
+                this.store.hideSelected();
+                this.commandTree.addCommand(key);
+                break;
+            case 'H':
+                this.store.showAll();
+                this.commandTree.addCommand(key);
+                break;
+
+            case 'w':
+            case 'W':
+                this.openWriteOverlay(key);
                 break;
 
             case 'a':
@@ -1879,6 +2012,11 @@ class CommandExecutor {
             case 'R': this.rotateSelected(Math.PI / 4); break;
             case 'e': this.reflectSelectedH(); break;
             case 'E': this.reflectSelectedV(); break;
+            case 'h': this.store.hideSelected(); break;
+            case 'H': this.store.showAll(); break;
+            case 'q': this.cycleCorner(); break;
+            case 'w': /* handled by replay loop inline */ break;
+            case 'W': /* handled by replay loop inline */ break;
             case 'a': this.selectAllOfColor(); break;
             case 'A': this.store.selectAll(); break;
             case 'z': this.cursor.x = 0; this.cursor.y = 0; this.cursor.z = 0; break;
@@ -1888,6 +2026,15 @@ class CommandExecutor {
                 this.animationActive = true;
                 this.animationLastTime = performance.now();
                 this.mode = 'animation';
+                break;
+            case 'p':
+                this.colorContext.enter();
+                break;
+            case 'v':
+                this.cameraContext.enter();
+                break;
+            case '#':
+                this.selectionContext.enter();
                 break;
             case '0': case '1': case '2': case '3': case '4': case '5': case '6':
                 this.currentView = parseInt(key);
@@ -2048,7 +2195,7 @@ class CommandExecutor {
         this.store.addFrame(
             this.cursor.x, this.cursor.y, this.cursor.z,
             nx, ny, nz,
-            1.0,
+            2.0,
             colorIndex
         );
     }
@@ -2074,13 +2221,13 @@ class CommandExecutor {
     }
 
     handleScale(key) {
-        // i/k: additive +/-2  |  I/K: multiply ×2/÷2  |  j/l: line ext shorter/longer
+        // i/k: additive +/-2, floor 2  |  I/K: ×2/÷2, floor 0.25  |  j/l: line ext shorter/longer
         const extStep = 0.25;
         switch (key) {
-            case 'i': this.store.scaleSelectedAdd(2);      break;
-            case 'k': this.store.scaleSelectedAdd(-2);     break;
-            case 'I': this.store.scaleSelected(2);         break;
-            case 'K': this.store.scaleSelected(0.5);       break;
+            case 'i': this.store.scaleSelectedAdd(2, 2);       break;
+            case 'k': this.store.scaleSelectedAdd(-2, 2);      break;
+            case 'I': this.store.scaleSelectedClamp(2, 0.25);  break;
+            case 'K': this.store.scaleSelectedClamp(0.5, 0.25); break;
             case 'j': this.lineExt = Math.max(0,   this.lineExt - extStep);
                       if (this.gpuLineUpdate) this.gpuLineUpdate(this.lineHW, this.lineExt); break;
             case 'l': this.lineExt = Math.min(8.0, this.lineExt + extStep);
@@ -2201,6 +2348,66 @@ class CommandExecutor {
         this.cursor.z = corner.z;
 
         this.cornerIndex = (this.cornerIndex + 1) % 8;
+    }
+
+    openWriteOverlay(key) {
+        const isW = key === 'w';
+        const overlayId = isW ? 'w-overlay' : 'W-overlay';
+        const inputId   = isW ? 'w-input'   : 'W-input';
+        const overlay = document.getElementById(overlayId);
+        const input   = document.getElementById(inputId);
+
+        // Pre-fill from first selected frame
+        let prefill = '';
+        for (let i = 0; i < this.store.count; i++) {
+            if (this.store.isSelected(i)) {
+                prefill = isW ? this.store.metadata[i].called : this.store.metadata[i].contents;
+                break;
+            }
+        }
+        overlay.classList.add('active');
+        // Defer focus so the triggering keypress ('w'/'W') doesn't land in the input
+        setTimeout(() => {
+            input.value = prefill;
+            input.focus();
+            input.select();
+        }, 0);
+
+        const submit = () => {
+            const text = input.value;
+            overlay.classList.remove('active');
+            if (isW) {
+                this.store.setCalledSelected(text);
+            } else {
+                this.store.setContentsSelected(text);
+            }
+            // Record as w[text] or W[text] in command string
+            const encoded = key + '[' + text + ']';
+            this.commandTree.addCommand(encoded);
+            cleanup();
+        };
+
+        const cancel = () => {
+            overlay.classList.remove('active');
+            cleanup();
+        };
+
+        const onKey = (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+            else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+        };
+
+        const cleanup = () => input.removeEventListener('keydown', onKey);
+        input.addEventListener('keydown', onKey);
+    }
+
+    applyWrite(key, text) {
+        if (key === 'w') {
+            this.store.setCalledSelected(text);
+            if (text && this.onNameWritten) this.onNameWritten();
+        } else {
+            this.store.setContentsSelected(text);
+        }
     }
 }
 
@@ -2440,7 +2647,7 @@ fn cull_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
   }
 
-  if (inside) {
+  if (inside && (inst.flags & 2u) != 0u) {
     let slot = atomicAdd(&indirect.instanceCount, 1u);
     visible[slot] = i;
   }
@@ -2546,6 +2753,9 @@ class Camera {
 // ============================================================
 async function main() {
   const canvas = document.getElementById('canvas');
+  const labelCanvas = document.getElementById('label-canvas');
+  const labelCtx = labelCanvas.getContext('2d');
+  let showLabels = false;
   const errEl = document.getElementById('error-msg');
 
   if (!navigator.gpu) { errEl.style.display='block'; errEl.textContent='WebGPU not supported. Use Chrome 113+.'; return; }
@@ -2655,6 +2865,8 @@ async function main() {
     const dpr = window.devicePixelRatio || 1;
     canvas.width = canvas.clientWidth * dpr;
     canvas.height = canvas.clientHeight * dpr;
+    labelCanvas.width = canvas.width;
+    labelCanvas.height = canvas.height;
     if (depthTex) depthTex.destroy();
     if (msaaTex) msaaTex.destroy();
     depthTex = device.createTexture({ size: [canvas.width, canvas.height], format: depthFormat, sampleCount: SAMPLE_COUNT, usage: GPUTextureUsage.RENDER_ATTACHMENT });
@@ -2668,6 +2880,7 @@ async function main() {
   const palette = new PaletteManager();
   const cam = new Camera(canvas);
   const executor = new CommandExecutor(store, palette, cam);
+  executor.onNameWritten = () => { showLabels = true; };
   executor.gpuLineUpdate = (hw, ext) => {
     const geo = buildFrameGeo(hw, ext);
     device.queue.writeBuffer(frameVB, 0, geo.verts);
@@ -2714,6 +2927,16 @@ async function main() {
       mintCommandString = cmd;
       executor.executeCommandString(cmd);
       if (mintPanel.classList.contains('active')) updateMintCommand();
+    }
+  });
+
+  document.getElementById('bracket-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      executor.selectionContext.submitBracketInput(e.target.value);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      executor.selectionContext.closeBracketInput();
     }
   });
 
@@ -2803,6 +3026,11 @@ async function main() {
         document.getElementById('command-bar').style.display = 'none';
         document.getElementById('mint-panel').classList.remove('active');
       }
+      return;
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      showLabels = !showLabels;
       return;
     }
     executor.executeKey(e.key, e.shiftKey);
@@ -2934,6 +3162,35 @@ async function main() {
       document.getElementById('draw-text').textContent = `Visible: ${visibleCount.toLocaleString()} / ${n.toLocaleString()}`;
     }
     document.getElementById('hud').className = showUI ? '' : 'hidden';
+
+    // 2D label overlay
+    if (showLabels && n > 0) {
+      labelCtx.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
+      const dpr = window.devicePixelRatio || 1;
+      labelCtx.font = `${Math.round(13 * dpr)}px 'SF Mono', 'Fira Code', monospace`;
+      labelCtx.textAlign = 'center';
+      for (let i = 0; i < store.count; i++) {
+        const meta = store.metadata[i];
+        if (!meta.called) continue;
+        const o = store._o(i);
+        const px = store.f32[o], py = store.f32[o+1], pz = store.f32[o+2];
+        // Project world pos to NDC via VP matrix
+        const vp = cam.vp;
+        const cx = vp[0]*px + vp[4]*py + vp[8]*pz  + vp[12];
+        const cy = vp[1]*px + vp[5]*py + vp[9]*pz  + vp[13];
+        const cw = vp[3]*px + vp[7]*py + vp[11]*pz + vp[15];
+        if (cw <= 0) continue;
+        const sx = ((cx / cw) * 0.5 + 0.5) * labelCanvas.width;
+        const sy = ((1 - cy / cw) * 0.5) * labelCanvas.height;
+        labelCtx.fillStyle = 'rgba(0,0,0,0.55)';
+        const tw = labelCtx.measureText(meta.called).width;
+        labelCtx.fillRect(sx - tw/2 - 4, sy - 14 * dpr, tw + 8, 18 * dpr);
+        labelCtx.fillStyle = '#ddd';
+        labelCtx.fillText(meta.called, sx, sy);
+      }
+    } else if (!showLabels) {
+      labelCtx.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
+    }
   }
 
   requestAnimationFrame(frame);
