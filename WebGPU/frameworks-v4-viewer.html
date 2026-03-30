@@ -922,13 +922,11 @@ class ColorContext {
         this.active = true;
         this.currentIndex = this.palette.getCurrentIndex();
         this.startingIndex = this.currentIndex;
-        document.getElementById('palette-overlay').classList.add('active');
         this.updateUI();
     }
 
     exit() {
         this.active = false;
-        document.getElementById('palette-overlay').classList.remove('active');
     }
 
     navigate(key) {
