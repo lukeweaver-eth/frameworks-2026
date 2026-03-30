@@ -3360,7 +3360,7 @@ async function main() {
     store.deselectAll();
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
-      const THUMB = 512;
+      const THUMB = 256;
       const offscreen = document.createElement('canvas');
       offscreen.width = THUMB; offscreen.height = THUMB;
       const ctx2d = offscreen.getContext('2d');
@@ -3370,11 +3370,14 @@ async function main() {
       const w = src.width * scale;
       const ox = (THUMB - w) / 2;
       ctx2d.drawImage(src, ox, 0, w, THUMB);
-      capturedImageURI = offscreen.toDataURL('image/jpeg', 0.85);
+      // Use WebP if supported, fall back to JPEG
+      const webpTest = document.createElement('canvas').toDataURL('image/webp');
+      const fmt = webpTest.startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg';
+      capturedImageURI = offscreen.toDataURL(fmt, 0.75);
       mintPreviewImg.src = capturedImageURI;
       mintPreviewImg.style.display = 'block';
       const kb = Math.round(capturedImageURI.length * 0.75 / 1024);
-      mintStatusEl.innerHTML = '<span class="success">Preview captured (~' + kb + ' KB).</span>';
+      mintStatusEl.innerHTML = '<span class="success">Preview captured (~' + kb + ' KB, ' + fmt.split('/')[1] + ').</span>';
     } catch (err) {
       mintStatusEl.innerHTML = '<span class="error">Capture failed: ' + err.message + '</span>';
     }
