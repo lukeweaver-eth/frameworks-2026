@@ -1,0 +1,19 @@
+{
+  "name": "@frameworks/mint-theme",
+  "type": "module",
+  "version": "0.1.0",
+  "license": "MIT",
+  "main": "./nuxt.config.ts",
+  "scripts": {
+    "dev": "nuxi dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview"
+  },
+  "dependencies": {
+    "@visualizevalue/mint-app-base": "^0.3.0"
+  },
+  "devDependencies": {
+    "nuxt": "^3.14.159"
+  }
+}
