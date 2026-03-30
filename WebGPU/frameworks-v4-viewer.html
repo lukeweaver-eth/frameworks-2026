@@ -792,6 +792,19 @@ class FrameStore {
         }
     }
 
+    getSelectionCenter() {
+        let sx = 0, sy = 0, sz = 0, count = 0;
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) {
+                const o = this._o(i);
+                sx += this.f32[o]; sy += this.f32[o+1]; sz += this.f32[o+2];
+                count++;
+            }
+        }
+        if (count === 0) return null;
+        return { x: sx / count, y: sy / count, z: sz / count };
+    }
+
     getBoundingBox() {
         if (this.count === 0) {
             return { minX:0, maxX:0, minY:0, maxY:0, minZ:0, maxZ:0, centerX:0, centerY:0, centerZ:0 };
@@ -1668,6 +1681,12 @@ class CommandExecutor {
                 this.commandTree.addCommand(key);
                 break;
 
+            case 'C': {
+                const ctr = this.store.getSelectionCenter();
+                if (ctr) { this.cursor.x = ctr.x; this.cursor.y = ctr.y; this.cursor.z = ctr.z; }
+                this.commandTree.addCommand(key);
+                break;
+            }
             case 'z':
                 this.cursor.x = 0;
                 this.cursor.y = 0;
@@ -1949,6 +1968,7 @@ class CommandExecutor {
             case 'W': /* handled by replay loop inline */ break;
             case 'a': this.selectAllOfColor(); break;
             case 'A': this.store.selectAll(); break;
+            case 'C': { const ctr = this.store.getSelectionCenter(); if (ctr) { this.cursor.x = ctr.x; this.cursor.y = ctr.y; this.cursor.z = ctr.z; } break; }
             case 'z': this.cursor.x = 0; this.cursor.y = 0; this.cursor.z = 0; break;
             case 'Z': this.centerStructureToCursor(); break;
             case ' ': this.snapSelectionToCursor(); break;
