@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Frameworks V4 — Step 4: Command String Replay (V3 Parity)</title>
+<title>Frameworks V4</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #0a0a0c; overflow: hidden; font-family: 'SF Mono', 'Fira Code', monospace; }
@@ -102,52 +102,6 @@ canvas { display: block; width: 100vw; height: 100vh; }
   pointer-events: none; z-index: 1;
 }
 
-/* Mint panel */
-#mint-panel {
-  position: fixed; top: 40px; right: 0; width: 340px; bottom: 0;
-  background: rgba(10,10,14,0.97); border-left: 1px solid #444;
-  padding: 16px; overflow-y: auto; z-index: 99;
-  display: none; pointer-events: all;
-}
-#mint-panel.active { display: block; }
-#mint-panel h3 { color: #ddd; font-size: 13px; margin: 0 0 12px 0; font-weight: 600; }
-#mint-panel label { color: #999; font-size: 11px; display: block; margin: 10px 0 4px 0; }
-#mint-panel input[type="text"],
-#mint-panel textarea {
-  width: 100%; background: #1a1a1e; color: #ddd; border: 1px solid #444;
-  padding: 8px 10px; font-family: inherit; font-size: 12px; border-radius: 3px;
-}
-#mint-panel textarea { height: 60px; resize: vertical; }
-#mint-panel .mint-row { display: flex; gap: 8px; margin-top: 8px; }
-#mint-panel .mint-btn {
-  flex: 1; background: #333; color: #ccc; border: 1px solid #555;
-  padding: 8px 12px; font-family: inherit; font-size: 11px;
-  cursor: pointer; border-radius: 3px; text-align: center;
-}
-#mint-panel .mint-btn:hover { background: #555; }
-#mint-panel .mint-btn.primary { background: #2a5a2a; border-color: #4a8a4a; color: #cfc; }
-#mint-panel .mint-btn.primary:hover { background: #3a7a3a; }
-#mint-panel .mint-btn.primary:disabled { background: #1a2a1a; color: #666; cursor: not-allowed; }
-#mint-panel .mint-btn.connect { background: #2a3a5a; border-color: #4a6a9a; color: #ccf; }
-#mint-panel .mint-btn.connect:hover { background: #3a4a7a; }
-#mint-status { color: #888; font-size: 11px; margin-top: 10px; line-height: 1.6; }
-#mint-status .success { color: #6c6; }
-#mint-status .error { color: #f66; }
-#mint-status .info { color: #6af; }
-#mint-preview-img {
-  width: 100%; aspect-ratio: 1; background: #111; border: 1px solid #333;
-  border-radius: 3px; margin-top: 6px; object-fit: contain; display: none;
-}
-#mint-command-display {
-  background: #111; border: 1px solid #333; padding: 6px 8px;
-  font-size: 10px; color: #8888aa; word-break: break-all;
-  max-height: 60px; overflow-y: auto; border-radius: 3px; margin-top: 6px;
-}
-#mint-config {
-  border-top: 1px solid #333; margin-top: 14px; padding-top: 10px;
-}
-#mint-config summary { color: #888; font-size: 11px; cursor: pointer; }
-#mint-config summary:hover { color: #bbb; }
 </style>
 </head>
 <body>
@@ -157,47 +111,8 @@ canvas { display: block; width: 100vw; height: 100vh; }
   <button id="btn-execute">Execute</button>
   <button id="btn-export">Export</button>
   <button id="btn-copy-hash">Copy Hash URL</button>
-  <button id="btn-mint-toggle" style="background:#2a5a2a;border-color:#4a8a4a;color:#cfc">Mint ▸</button>
 </div>
 
-<!-- Mint Panel -->
-<div id="mint-panel">
-  <h3>MINT TO COLLECTION</h3>
-
-  <button id="btn-wallet" class="mint-btn connect" style="width:100%">Connect Wallet</button>
-  <div id="wallet-status" style="color:#666;font-size:10px;margin-top:4px"></div>
-
-  <label>Token Name</label>
-  <input type="text" id="mint-name" placeholder="My Frameworks Piece">
-
-  <label>Description</label>
-  <textarea id="mint-desc" placeholder="A spatial composition built in Frameworks V4..."></textarea>
-
-  <label>Command String</label>
-  <div id="mint-command-display">Build something, then click Export ↑</div>
-
-  <label>Preview Image</label>
-  <div class="mint-row">
-    <button id="btn-capture" class="mint-btn">Capture Preview</button>
-  </div>
-  <img id="mint-preview-img" alt="preview">
-
-  <div class="mint-row" style="margin-top:14px">
-    <button id="btn-mint" class="mint-btn primary" disabled>Mint Token</button>
-  </div>
-
-  <div id="mint-status"></div>
-
-  <details id="mint-config">
-    <summary>Collection Config</summary>
-    <label>Collection Address</label>
-    <input type="text" id="mint-collection" placeholder="0x..." value="0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40">
-    <label>Renderer Index</label>
-    <input type="text" id="mint-renderer-idx" placeholder="0" value="4">
-    <label>Chain ID</label>
-    <input type="text" id="mint-chain-id" placeholder="1" value="11155111">
-  </details>
-</div>
 
 <canvas id="canvas"></canvas>
 <div id="hud">
@@ -239,7 +154,6 @@ canvas { display: block; width: 100vw; height: 100vh; }
 
 <canvas id="label-canvas"></canvas>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
 <script>
 // ============================================================
 // FRAME STORE — Typed array backend from frame-store.js
@@ -2926,7 +2840,6 @@ async function main() {
       palette.reset();
       mintCommandString = cmd;
       executor.executeCommandString(cmd);
-      if (mintPanel.classList.contains('active')) updateMintCommand();
     }
   });
 
@@ -2948,8 +2861,7 @@ async function main() {
         palette.reset();
         mintCommandString = cmd;
         executor.executeCommandString(cmd);
-        if (mintPanel.classList.contains('active')) updateMintCommand();
-      }
+        }
       commandInput.blur();
     } else if (e.key === 'Escape') {
       commandInput.blur();
@@ -2994,7 +2906,6 @@ async function main() {
     if (e.key === '?') {
       showUI = !showUI;
       document.getElementById('command-bar').style.display = showUI ? '' : 'none';
-      if (!showUI) document.getElementById('mint-panel').classList.remove('active');
       return;
     }
     if (e.key === '%') {
@@ -3024,7 +2935,6 @@ async function main() {
         store.deselectAll();
         showUI = false;
         document.getElementById('command-bar').style.display = 'none';
-        document.getElementById('mint-panel').classList.remove('active');
       }
       return;
     }
@@ -3195,176 +3105,6 @@ async function main() {
 
   requestAnimationFrame(frame);
 
-  // ============================================================
-  // MINT PANEL LOGIC
-  // ============================================================
-  const MINT_ABI = [
-    "function create(string tokenName, string tokenDescription, bytes[] tokenArtifact, uint32 tokenRenderer, uint128 tokenData)",
-    "function prepareArtifact(uint256 tokenId, bytes[] tokenArtifact, bool clear)",
-    "function latestTokenId() view returns (uint256)",
-    "function registerRenderer(address renderer) returns (uint256)",
-    "function renderers(uint256) view returns (address)",
-    "function mintOpenUntil(uint256 tokenId) view returns (uint256)",
-  ];
-
-  const mintPanel = document.getElementById('mint-panel');
-  const btnMintToggle = document.getElementById('btn-mint-toggle');
-  const btnWallet = document.getElementById('btn-wallet');
-  const walletStatus = document.getElementById('wallet-status');
-  const mintNameInput = document.getElementById('mint-name');
-  const mintDesc = document.getElementById('mint-desc');
-  const mintCmdDisplay = document.getElementById('mint-command-display');
-  const btnCapture = document.getElementById('btn-capture');
-  const mintPreviewImg = document.getElementById('mint-preview-img');
-  const btnMint = document.getElementById('btn-mint');
-  const mintStatusEl = document.getElementById('mint-status');
-  const mintCollection = document.getElementById('mint-collection');
-  const mintRendererIdx = document.getElementById('mint-renderer-idx');
-
-  let mintSigner = null;
-  let mintProvider = null;
-  let capturedImageURI = null;
-
-  // Toggle panel
-  btnMintToggle.addEventListener('click', () => {
-    const isOpen = mintPanel.classList.toggle('active');
-    btnMintToggle.textContent = isOpen ? 'Mint \u25C2' : 'Mint \u25B8';
-    if (isOpen) updateMintCommand();
-  });
-
-  function updateMintCommand() {
-    // Prefer the literal command bar input (preserves repeat notation like (dR,23)).
-    // Fall back to condensing the keystroke sequence for interactively built compositions.
-    const display = mintCommandString ||
-      executor.condenseCommandString(executor.commandTree.getCurrentCommandSequence().join(''));
-    mintCmdDisplay.textContent = display || '(empty \u2014 build something first)';
-    validateMintReady();
-  }
-
-  function validateMintReady() {
-    const hasCmd = mintCmdDisplay.textContent && !mintCmdDisplay.textContent.startsWith('(empty');
-    const hasName = mintNameInput.value.trim().length > 0;
-    const hasImage = !!capturedImageURI;
-    const hasWallet = !!mintSigner;
-    const hasCollection = mintCollection.value.trim().length === 42;
-    btnMint.disabled = !(hasCmd && hasName && hasImage && hasWallet && hasCollection);
-  }
-
-  mintNameInput.addEventListener('input', validateMintReady);
-  mintDesc.addEventListener('input', validateMintReady);
-  mintCollection.addEventListener('input', validateMintReady);
-
-  // Wallet connection
-  btnWallet.addEventListener('click', async () => {
-    try {
-      if (!window.ethereum) { walletStatus.textContent = 'No wallet found. Install MetaMask.'; return; }
-      mintProvider = new ethers.BrowserProvider(window.ethereum);
-      mintSigner = await mintProvider.getSigner();
-      const addr = await mintSigner.getAddress();
-      const network = await mintProvider.getNetwork();
-      btnWallet.textContent = addr.slice(0,6) + '...' + addr.slice(-4);
-      walletStatus.textContent = 'Connected on chain ' + network.chainId;
-      document.getElementById('mint-chain-id').value = network.chainId.toString();
-      validateMintReady();
-    } catch (err) { walletStatus.textContent = 'Error: ' + err.message; }
-  });
-
-  // Preview capture — downsample to 512×512 JPEG to keep artifact small (~20-40KB)
-  btnCapture.addEventListener('click', async () => {
-    mintStatusEl.innerHTML = '<span class="info">Capturing preview...</span>';
-    const wasShowUI = showUI;
-    showUI = false;
-    store.deselectAll();
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    try {
-      const THUMB = 512;
-      const offscreen = document.createElement('canvas');
-      offscreen.width = THUMB; offscreen.height = THUMB;
-      const ctx2d = offscreen.getContext('2d');
-      // Draw canvas into square thumbnail (letterbox if needed)
-      const src = canvas;
-      const scale = Math.min(THUMB / src.width, THUMB / src.height);
-      const w = src.width * scale, h = src.height * scale;
-      const ox = (THUMB - w) / 2, oy = (THUMB - h) / 2;
-      ctx2d.fillStyle = '#0a0a0c';
-      ctx2d.fillRect(0, 0, THUMB, THUMB);
-      ctx2d.drawImage(src, ox, oy, w, h);
-      capturedImageURI = offscreen.toDataURL('image/jpeg', 0.85);
-      mintPreviewImg.src = capturedImageURI;
-      mintPreviewImg.style.display = 'block';
-      const kb = Math.round(capturedImageURI.length * 0.75 / 1024);
-      mintStatusEl.innerHTML = '<span class="success">Preview captured (~' + kb + ' KB).</span>';
-    } catch (err) {
-      mintStatusEl.innerHTML = '<span class="error">Capture failed: ' + err.message + '</span>';
-    }
-    showUI = wasShowUI;
-    validateMintReady();
-  });
-
-  // Also update mint panel when Export is clicked
-  const origExportHandler = btnExport.onclick;
-  btnExport.addEventListener('click', () => {
-    if (mintPanel.classList.contains('active')) setTimeout(updateMintCommand, 50);
-  });
-
-  // Mint token
-  btnMint.addEventListener('click', async () => {
-    if (!mintSigner || !capturedImageURI) return;
-    const tokenName = mintNameInput.value.trim();
-    const tokenDescription = mintDesc.value.trim();
-    const commandStr = mintCommandString ||
-      executor.condenseCommandString(executor.commandTree.getCurrentCommandSequence().join(''));
-    const collectionAddr = mintCollection.value.trim();
-    const rendererIdx = parseInt(mintRendererIdx.value) || 0;
-    if (!tokenName || !commandStr || !collectionAddr) {
-      mintStatusEl.innerHTML = '<span class="error">Fill in all required fields.</span>';
-      return;
-    }
-    btnMint.disabled = true;
-    mintStatusEl.innerHTML = '<span class="info">Encoding artifact...</span>';
-    try {
-      const abiCoder = new ethers.AbiCoder();
-      const artifactHex = abiCoder.encode(['string', 'string'], [capturedImageURI, commandStr]);
-      const mint = new ethers.Contract(collectionAddr, MINT_ABI, mintSigner);
-      const MAX_CHUNK = 24000;
-      const totalBytes = ethers.getBytes(artifactHex);
-      const byteLength = totalBytes.length;
-      mintStatusEl.innerHTML = '<span class="info">Artifact: ' + (byteLength / 1024).toFixed(1) + ' KB</span>';
-
-      if (byteLength <= MAX_CHUNK) {
-        mintStatusEl.innerHTML = '<span class="info">Sending create transaction...</span>';
-        const tx = await mint.create(tokenName, tokenDescription, [artifactHex], rendererIdx, 0);
-        mintStatusEl.innerHTML = '<span class="info">Tx: ' + tx.hash.slice(0,10) + '... confirming...</span>';
-        await tx.wait();
-        const tokenId = await mint.latestTokenId();
-        mintStatusEl.innerHTML = '<span class="success">Minted! Token #' + tokenId + '<br>Tx: ' + tx.hash + '</span>';
-      } else {
-        const chunks = [];
-        for (let i = 0; i < totalBytes.length; i += MAX_CHUNK) {
-          chunks.push(ethers.hexlify(totalBytes.slice(i, i + MAX_CHUNK)));
-        }
-        const nextTokenId = (await mint.latestTokenId()) + 1n;
-        mintStatusEl.innerHTML = '<span class="info">Large artifact (' + chunks.length + ' chunks). Preparing #' + nextTokenId + '...</span>';
-        for (let i = 0; i < chunks.length; i++) {
-          mintStatusEl.innerHTML = '<span class="info">Chunk ' + (i+1) + '/' + chunks.length + '...</span>';
-          const tx = await mint.prepareArtifact(nextTokenId, [chunks[i]], i === 0);
-          await tx.wait();
-        }
-        mintStatusEl.innerHTML = '<span class="info">Creating token...</span>';
-        const tx = await mint.create(tokenName, tokenDescription, [], rendererIdx, 0);
-        mintStatusEl.innerHTML = '<span class="info">Tx: ' + tx.hash.slice(0,10) + '... confirming...</span>';
-        await tx.wait();
-        const tokenId = await mint.latestTokenId();
-        mintStatusEl.innerHTML = '<span class="success">Minted! Token #' + tokenId + '<br>Tx: ' + tx.hash + '</span>';
-      }
-    } catch (err) {
-      console.error('Mint error:', err);
-      let msg = err.message;
-      if (err.reason) msg = err.reason;
-      mintStatusEl.innerHTML = '<span class="error">' + msg + '</span>';
-    }
-    validateMintReady();
-  });
 }
 
 main().catch(e => {

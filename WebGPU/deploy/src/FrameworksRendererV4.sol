@@ -32,7 +32,7 @@ contract FrameworksRendererV4 is IRenderer {
     address constant private ethfsFileStorage = 0xFe1411d6864592549AdE050215482e4385dFa0FB;
 
     /// @dev Filename as stored on EthFS. Bump version on each reupload.
-    string  constant private FILE_NAME = "frameworks_v4_mint_v4.html";
+    string  constant private FILE_NAME = "frameworks_v4_viewer_v1.html";
 
     // =========================================================================
     // IRenderer — identity
