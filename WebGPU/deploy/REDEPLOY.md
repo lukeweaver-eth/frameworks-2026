@@ -107,6 +107,7 @@ In `frameworks-v4-mint.html`, update the Collection Config defaults:
 | v3 | `frameworks_v4_mint_v3.html` | `0xa2386b0700F93E4eEF7ecC471f841216ba9ECBa6` | — (superseded) | Full mint HTML on-chain; zero viewer drift; autoExecuteCommand injection |
 | v4 | `frameworks_v4_mint_v4.html` | `0xE958203177Cc654d0Af06E2E23d606F274E935a2` | 4 (pending registration) | s/S scale+line rework; frame selection system; h/H hide; q corner replay fix; default scale 2; command replay headless |
 | v5 | `frameworks_v4_viewer_v1.html` | `0x76E477Fd9f966520c553cc2Eb6056BCB2636A58c` | 5 (pending registration) | Split viewer/mint: viewer has full interactivity minus ethers/wallet/mint panel; w/W text labels; Tab label toggle; mintCommandString populated on auto-execute |
+| v6 | `frameworks_v4_viewer_v2.html` | `0x358a5a7A0d8f23B52A86Dd1fbA3BBB358227A250` | 6 (pending registration) | Minified (112KB→62KB); q corner reset fix; e/E proper reflection; C snap cursor to selection; / command overlay; ? shows original command; full reset on execute |
 
 Collection: `0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40` (Sepolia)
 EthFS FileStore: `0xFe1411d6864592549AdE050215482e4385dFa0FB` (all networks)

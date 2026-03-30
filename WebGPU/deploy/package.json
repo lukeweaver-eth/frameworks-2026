@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "minify": "echo 'No minify step needed — HTML uploads as plain text. Run npm run upload directly.'",
+    "minify": "node script/minify-viewer.mjs",
     "upload": "node script/upload-to-ethfs.mjs",
     "register": "node script/register-renderer.mjs"
   },
