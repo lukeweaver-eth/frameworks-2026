@@ -525,20 +525,19 @@ class FrameStore {
         for (let i = 0; i < this.count; i++) {
             if (!(this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED)) continue;
             const o = this._o(i);
-
             switch (reflectAxis) {
-                case 'x': {
-                    const d = this.f32[o + F.PX] - cx;
-                    this.f32[o + F.PX] = cx - d;
+                case 'x':
+                    this.f32[o + F.PX] = 2*cx - this.f32[o + F.PX];
+                    this.f32[o + F.RX] = -this.f32[o + F.RX];
+                    this.f32[o + F.UX] = -this.f32[o + F.UX];
                     this.f32[o + F.NX] = -this.f32[o + F.NX];
                     break;
-                }
-                case 'z': {
-                    const d = this.f32[o + F.PZ] - cz;
-                    this.f32[o + F.PZ] = cz - d;
+                case 'z':
+                    this.f32[o + F.PZ] = 2*cz - this.f32[o + F.PZ];
+                    this.f32[o + F.RZ] = -this.f32[o + F.RZ];
+                    this.f32[o + F.UZ] = -this.f32[o + F.UZ];
                     this.f32[o + F.NZ] = -this.f32[o + F.NZ];
                     break;
-                }
             }
             this._markDirty(i);
         }
@@ -555,20 +554,19 @@ class FrameStore {
         for (let i = 0; i < this.count; i++) {
             if (!(this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED)) continue;
             const o = this._o(i);
-
             switch (reflectAxis) {
-                case 'y': {
-                    const d = this.f32[o + F.PY] - cy;
-                    this.f32[o + F.PY] = cy - d;
+                case 'y':
+                    this.f32[o + F.PY] = 2*cy - this.f32[o + F.PY];
+                    this.f32[o + F.RY] = -this.f32[o + F.RY];
+                    this.f32[o + F.UY] = -this.f32[o + F.UY];
                     this.f32[o + F.NY] = -this.f32[o + F.NY];
                     break;
-                }
-                case 'z': {
-                    const d = this.f32[o + F.PZ] - cz;
-                    this.f32[o + F.PZ] = cz - d;
+                case 'z':
+                    this.f32[o + F.PZ] = 2*cz - this.f32[o + F.PZ];
+                    this.f32[o + F.RZ] = -this.f32[o + F.RZ];
+                    this.f32[o + F.UZ] = -this.f32[o + F.UZ];
                     this.f32[o + F.NZ] = -this.f32[o + F.NZ];
                     break;
-                }
             }
             this._markDirty(i);
         }
