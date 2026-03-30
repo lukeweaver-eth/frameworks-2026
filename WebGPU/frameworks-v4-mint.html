@@ -2006,6 +2006,7 @@ class CommandExecutor {
     }
 
     executeKeyNormal(key) {
+        if (key !== 'q') this.cornerIndex = 0;
         if (this.mode === 'translate') {
             if (['i', 'j', 'k', 'l'].includes(key)) {
                 return this.handleTranslate(key);
