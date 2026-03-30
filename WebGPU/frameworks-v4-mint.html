@@ -3364,14 +3364,12 @@ async function main() {
       const offscreen = document.createElement('canvas');
       offscreen.width = THUMB; offscreen.height = THUMB;
       const ctx2d = offscreen.getContext('2d');
-      // Draw canvas into square thumbnail (letterbox if needed)
+      // Crop: scale so height fills the square, clip sides
       const src = canvas;
-      const scale = Math.min(THUMB / src.width, THUMB / src.height);
-      const w = src.width * scale, h = src.height * scale;
-      const ox = (THUMB - w) / 2, oy = (THUMB - h) / 2;
-      ctx2d.fillStyle = '#0a0a0c';
-      ctx2d.fillRect(0, 0, THUMB, THUMB);
-      ctx2d.drawImage(src, ox, oy, w, h);
+      const scale = THUMB / src.height;
+      const w = src.width * scale;
+      const ox = (THUMB - w) / 2;
+      ctx2d.drawImage(src, ox, 0, w, THUMB);
       capturedImageURI = offscreen.toDataURL('image/jpeg', 0.85);
       mintPreviewImg.src = capturedImageURI;
       mintPreviewImg.style.display = 'block';
