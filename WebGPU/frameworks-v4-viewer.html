@@ -96,6 +96,19 @@ canvas { display: block; width: 100vw; height: 100vh; }
   font-family: inherit; font-size: 14px; width: 100%; height: 120px; resize: vertical;
 }
 
+/* / command overlay */
+#slash-overlay {
+  position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
+  background: rgba(10,10,14,0.95); border: 1px solid #555; padding: 10px 12px;
+  display: none; pointer-events: all; min-width: 400px; z-index: 200;
+}
+#slash-overlay.active { display: flex; gap: 8px; align-items: center; }
+#slash-overlay label { color: #999; font-size: 11px; white-space: nowrap; }
+#slash-input {
+  flex: 1; background: #222; color: #ddd; border: 1px solid #555; padding: 6px 8px;
+  font-family: inherit; font-size: 13px;
+}
+
 /* 2D label overlay canvas */
 #label-canvas {
   position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
@@ -150,6 +163,11 @@ canvas { display: block; width: 100vw; height: 100vh; }
 <div id="W-overlay">
   <label>Contents — Enter to apply, Shift+Enter for newline, Escape to cancel</label>
   <textarea id="W-input" placeholder="Frame contents..."></textarea>
+</div>
+
+<div id="slash-overlay">
+  <label>/ command:</label>
+  <input type="text" id="slash-input" placeholder="e.g. fp or (dR,4)">
 </div>
 
 <canvas id="label-canvas"></canvas>
@@ -2853,6 +2871,25 @@ async function main() {
     }
   });
 
+  document.getElementById('slash-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const cmd = e.target.value.trim();
+      const overlay = document.getElementById('slash-overlay');
+      overlay.classList.remove('active');
+      if (cmd) {
+        executor.executeCommandString(cmd);
+        // Append to command bar input
+        const existing = commandInput.value.trim();
+        commandInput.value = existing ? existing + ' ' + cmd : cmd;
+        mintCommandString = commandInput.value;
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      document.getElementById('slash-overlay').classList.remove('active');
+    }
+  });
+
   commandInput.addEventListener('keydown', e => {
     if (e.key === 'Enter') {
       const cmd = commandInput.value.trim();
@@ -2906,6 +2943,17 @@ async function main() {
     if (e.key === '?') {
       showUI = !showUI;
       document.getElementById('command-bar').style.display = showUI ? '' : 'none';
+      if (showUI && mintCommandString && !commandInput.value) {
+        commandInput.value = mintCommandString;
+      }
+      return;
+    }
+    if (e.key === '/') {
+      e.preventDefault();
+      const overlay = document.getElementById('slash-overlay');
+      const input = document.getElementById('slash-input');
+      overlay.classList.add('active');
+      setTimeout(() => { input.value = ''; input.focus(); }, 0);
       return;
     }
     if (e.key === '%') {
