@@ -2437,6 +2437,23 @@ class CommandExecutor {
         input.addEventListener('keydown', onKey);
     }
 
+    resetAll() {
+        this.cursor.x = 0; this.cursor.y = 0; this.cursor.z = 0;
+        this.mode = 'normal';
+        this.cornerIndex = 0;
+        this.animationActive = false;
+        this.lineHW  = 0.018;
+        this.lineExt = 0.125;
+        if (this.gpuLineUpdate) this.gpuLineUpdate(this.lineHW, this.lineExt);
+        if (this.colorContext.active)     this.colorContext.exit();
+        if (this.cameraContext.active)    this.cameraContext.exit();
+        if (this.selectionContext.active) this.selectionContext.exit();
+        const cam = this.camera;
+        cam.theta = Math.PI / 4; cam.phi = Math.PI / 6; cam.dist = 30;
+        cam.target = [0, 0, 0];
+        cam.invalidate();
+    }
+
     applyWrite(key, text) {
         if (key === 'w') {
             this.store.setCalledSelected(text);
@@ -2960,6 +2977,7 @@ async function main() {
     if (cmd) {
       store.clear();
       palette.reset();
+      executor.resetAll();
       mintCommandString = cmd;
       executor.executeCommandString(cmd);
       if (mintPanel.classList.contains('active')) updateMintCommand();
@@ -3000,6 +3018,7 @@ async function main() {
       if (cmd) {
         store.clear();
         palette.reset();
+        executor.resetAll();
         mintCommandString = cmd;
         executor.executeCommandString(cmd);
         if (mintPanel.classList.contains('active')) updateMintCommand();
