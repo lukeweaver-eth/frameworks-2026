@@ -1,0 +1,4 @@
+[build]
+  base = "mint-theme"
+  command = "npm run build"
+  publish = ".output/public"
