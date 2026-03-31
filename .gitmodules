@@ -1,0 +1,15 @@
+[submodule "ethfs-repo"]
+	path = ethfs-repo
+	url = https://github.com/frolic/ethfs.git
+
+[submodule "frameworks-v3"]
+	path = frameworks-v3
+	url = https://github.com/lukeweaver-eth/frameworks-2026.git
+
+[submodule "mint-repo"]
+	path = mint-repo
+	url = https://github.com/visualizevalue/mint.git
+
+[submodule "scripty-repo"]
+	path = scripty-repo
+	url = https://github.com/intartnft/scripty.sol.git
