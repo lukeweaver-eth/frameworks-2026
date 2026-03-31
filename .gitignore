@@ -7,3 +7,6 @@ WebGPU/deploy/cache/
 WebGPU/deploy/broadcast/
 WebGPU/deploy/out/
 WebGPU/deploy/lib/
+
+# Local Netlify folder
+.netlify
