@@ -8,6 +8,10 @@ export default defineNuxtConfig({
 
   ssr: false,
 
+  nitro: {
+    preset: 'static',
+  },
+
   alias: {
     '@base': '@visualizevalue/mint-app-base',
   },
