@@ -16,6 +16,14 @@ export default defineNuxtConfig({
     '@base': '@visualizevalue/mint-app-base',
   },
 
+  hooks: {
+    'app:resolve'(app) {
+      app.plugins = app.plugins.filter(
+        p => !p.src.includes('mint-app-base') || !p.src.includes('3.dapp-query.client')
+      )
+    },
+  },
+
   runtimeConfig: {
     public: {
       title: 'Frameworks',

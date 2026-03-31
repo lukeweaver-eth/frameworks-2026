@@ -7,9 +7,8 @@ import type { QueryClient } from '@1001-digital/dapp-query-core'
 export default defineNuxtPlugin((nuxtApp) => {
   const config = nuxtApp.$config.public
 
-  // Use a chain-scoped cache name to avoid stale mainnet data bleeding
-  // into a Sepolia deployment (the base app uses 'mint-query' which
-  // gets shared across all deployments in the same browser profile).
+  // Chain-scoped cache key avoids stale mainnet data (factory 0xd717)
+  // bleeding into this Sepolia deployment via shared IndexedDB.
   const cacheKey = `mint-query-${config.chainId}`
 
   const queryClient = createQueryClient({
