@@ -6,9 +6,7 @@ const currentDir = dirname(fileURLToPath(import.meta.url))
 export default defineNuxtConfig({
   extends: ['@visualizevalue/mint-app-base'],
 
-  nitro: {
-    preset: 'netlify',
-  },
+  ssr: false,
 
   alias: {
     '@base': '@visualizevalue/mint-app-base',

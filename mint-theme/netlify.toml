@@ -6,3 +6,8 @@
 
 [build.environment]
   GIT_SUBMODULE_STRATEGY = "none"
+
+[[redirects]]
+  from = "/*"
+  to = "/200.html"
+  status = 200
