@@ -2,3 +2,7 @@
   base = "mint-theme"
   command = "npm run build"
   publish = ".output/public"
+  ignore = "git diff --quiet HEAD^ HEAD -- ."
+
+[build.environment]
+  GIT_SUBMODULE_STRATEGY = "none"
