@@ -22,6 +22,8 @@ export default defineNuxtConfig({
       description: 'A spatial content structure tool for constructing compositions in 3D space.',
       platformUrl: 'https://mint.frameworks.art',
       chainId: 11155111,
+      factoryAddress: '0x750C5a6CFD40C9CaA48C31D87AC2a26101Acd517',
+      blockExplorer: 'https://sepolia.etherscan.io',
       creatorAddress: '0xeE514bd06a8479e3E4771f03Cd01D2AF22aEb86D',
       rpc1: 'https://sepolia.infura.io/v3/e0257a7934fe49e79af76206d479e2bf',
       rpc2: 'https://ethereum-sepolia-rpc.publicnode.com',
