@@ -23,7 +23,7 @@ import { dirname, join } from 'path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const FILE_STORE_ADDRESS = '0xFe1411d6864592549AdE050215482e4385dFa0FB';
-const FILE_NAME = 'frameworks_v4_viewer_v2.html';
+const FILE_NAME = 'frameworks_v4_viewer_v3.html';
 const CHUNK_SIZE = 20000; // bytes — safely under 24KB SSTORE2 limit
 
 const FILE_STORE_ABI = [
@@ -56,7 +56,7 @@ async function main() {
   }
 
   // Read HTML
-  const htmlPath = join(__dirname, '..', 'viewer', 'frameworks_v4_viewer_v2.min.html');
+  const htmlPath = join(__dirname, '..', 'viewer', 'frameworks_v4_viewer_v3.min.html');
   let contents;
   try {
     contents = readFileSync(htmlPath, 'utf8');

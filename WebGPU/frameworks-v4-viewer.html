@@ -5,7 +5,7 @@
 <title>Frameworks V4</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { background: #0a0a0c; overflow: hidden; font-family: 'SF Mono', 'Fira Code', monospace; }
+body { background: #12141a; overflow: hidden; font-family: 'SF Mono', 'Fira Code', monospace; }
 canvas { display: block; width: 100vw; height: 100vh; }
 
 /* Command input bar */
@@ -31,7 +31,6 @@ canvas { display: block; width: 100vw; height: 100vh; }
   pointer-events: none; color: #8888aa; font-size: 11px; line-height: 1.6;
 }
 #hud.hidden * { display: none !important; }
-#hud.hidden #mode-display { display: block !important; }
 #mode-display {
   position: absolute; top: 12px; left: 12px;
   background: rgba(10,10,14,0.85); padding: 6px 12px; border: 1px solid #333;
@@ -75,6 +74,17 @@ canvas { display: block; width: 100vw; height: 100vh; }
 #bracket-input {
   background: #222; color: #ddd; border: 1px solid #555; padding: 8px;
   font-family: inherit; font-size: 14px; width: 300px;
+}
+
+#palette-bracket-overlay {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: rgba(10,10,14,0.95); border: 2px solid #555; padding: 16px;
+  display: none; pointer-events: all;
+}
+#palette-bracket-overlay.active { display: block; }
+#palette-bracket-input {
+  background: #222; color: #ddd; border: 1px solid #555; padding: 8px;
+  font-family: inherit; font-size: 14px; width: 200px;
 }
 
 /* w/W content overlays */
@@ -153,6 +163,11 @@ canvas { display: block; width: 100vw; height: 100vh; }
 <div id="bracket-overlay">
   <div style="color:#999;margin-bottom:8px;">Selection Input (e.g., 0,1,2 or 5:10)</div>
   <input type="text" id="bracket-input" placeholder="Enter frame IDs...">
+</div>
+
+<div id="palette-bracket-overlay">
+  <div style="color:#999;margin-bottom:8px;">Palette Range (e.g., 3 or 1:10)</div>
+  <input type="text" id="palette-bracket-input" placeholder="e.g. 1:10">
 </div>
 
 <div id="w-overlay">
@@ -897,19 +912,98 @@ class FrameStore {
 class PaletteManager {
     constructor() {
         this.currentIndex = 0;
+        this.colors = Array.from({ length: 80 }, (_, i) => {
+            const hex = [
+                'E84AA9','F2399D','DB2F96','E73E85','FF7F8E','FA5B67','E8424E','D5332F',
+                'C23532','F2281C','D41515','9D262F','DE3237','DA3321','EA3A2D','EB4429',
+                'EC7368','FF8079','FF9193','EA5B33','D05C35','ED7C30','EF9933','EF8C37',
+                'F18930','F09837','F9A45C','F2A43A','F2A840','F2A93C','FFB340','F2B341',
+                'FAD064','F7CA57','F6CB45','FFAB00','F4C44A','FCDE5B','F9DA4D','F9DA4A',
+                'FAE272','F9DB49','FAE663','FBEA5B','A7CA45','B5F13B','94E337','63C23C',
+                '86E48E','77E39F','5FCD8C','83F1AE','9DEFBF','2E9D9A','3EB8A1','5FC9BF',
+                '77D3DE','6AD1DE','5ABAD3','4291A8','33758D','45B2D3','81D1EC','A7DDF9',
+                '9AD9FB','A4C8EE','60B1F4','2480BD','4576D0','3263D0','2E4985','25438C',
+                '525EAA','3D43B3','322F92','4A2387','371471','3B088C','6C31D7','9741DA'
+            ][i];
+            return [
+                parseInt(hex.substring(0,2),16)/255,
+                parseInt(hex.substring(2,4),16)/255,
+                parseInt(hex.substring(4,6),16)/255,
+                1
+            ];
+        });
     }
 
-    getCurrentIndex() {
-        return this.currentIndex;
-    }
+    get size() { return this.colors.length; }
+
+    getCurrentIndex() { return this.currentIndex; }
 
     getNextColor() {
-        this.currentIndex = (this.currentIndex + 1) % 80;
+        this.currentIndex = (this.currentIndex + 1) % this.size;
         return this.currentIndex;
     }
 
     reset() {
         this.currentIndex = 0;
+        // Restore full 80-color palette
+        this.colors = Array.from({ length: 80 }, (_, i) => {
+            const hex = [
+                'E84AA9','F2399D','DB2F96','E73E85','FF7F8E','FA5B67','E8424E','D5332F',
+                'C23532','F2281C','D41515','9D262F','DE3237','DA3321','EA3A2D','EB4429',
+                'EC7368','FF8079','FF9193','EA5B33','D05C35','ED7C30','EF9933','EF8C37',
+                'F18930','F09837','F9A45C','F2A43A','F2A840','F2A93C','FFB340','F2B341',
+                'FAD064','F7CA57','F6CB45','FFAB00','F4C44A','FCDE5B','F9DA4D','F9DA4A',
+                'FAE272','F9DB49','FAE663','FBEA5B','A7CA45','B5F13B','94E337','63C23C',
+                '86E48E','77E39F','5FCD8C','83F1AE','9DEFBF','2E9D9A','3EB8A1','5FC9BF',
+                '77D3DE','6AD1DE','5ABAD3','4291A8','33758D','45B2D3','81D1EC','A7DDF9',
+                '9AD9FB','A4C8EE','60B1F4','2480BD','4576D0','3263D0','2E4985','25438C',
+                '525EAA','3D43B3','322F92','4A2387','371471','3B088C','6C31D7','9741DA'
+            ][i];
+            return [parseInt(hex.substring(0,2),16)/255, parseInt(hex.substring(2,4),16)/255, parseInt(hex.substring(4,6),16)/255, 1];
+        });
+    }
+
+    toFloat32Array() {
+        const c = new Float32Array(this.size * 4);
+        for (let i = 0; i < this.size; i++) {
+            c[i*4]   = this.colors[i][0];
+            c[i*4+1] = this.colors[i][1];
+            c[i*4+2] = this.colors[i][2];
+            c[i*4+3] = this.colors[i][3];
+        }
+        return c;
+    }
+
+    // Delete indices in range [start, end] inclusive. Compact and remap frame colors.
+    deleteRange(start, end, store) {
+        const oldSize = this.size;
+        const newColors = this.colors.filter((_, i) => i < start || i > end);
+        const newSize = newColors.length;
+        if (newSize === 0) return; // never delete everything
+
+        // Build remap: oldIndex -> newIndex
+        const remap = new Array(oldSize);
+        let j = 0;
+        for (let i = 0; i < oldSize; i++) {
+            if (i >= start && i <= end) {
+                // deleted: map to nearest surviving color below, or 0
+                remap[i] = Math.max(0, start - 1);
+            } else {
+                remap[i] = j++;
+            }
+        }
+
+        // Remap all frame color indices
+        const count = store.count;
+        for (let i = 0; i < count; i++) {
+            const o = store._o(i) + 7; // U.COLOR_INDEX offset
+            const old = store.u32[o];
+            store.u32[o] = remap[old % oldSize];
+        }
+        store._markAllDirty();
+
+        this.colors = newColors;
+        this.currentIndex = Math.min(this.currentIndex, newSize - 1);
     }
 }
 
@@ -943,17 +1037,17 @@ class ColorContext {
     navigate(key) {
         const oldIdx = this.currentIndex;
         switch (key) {
-            case 'i': this.currentIndex = (this.currentIndex - this.cols + 80) % 80; break;
-            case 'k': this.currentIndex = (this.currentIndex + this.cols) % 80; break;
-            case 'j': this.currentIndex = (this.currentIndex - 1 + 80) % 80; break;
-            case 'l': this.currentIndex = (this.currentIndex + 1) % 80; break;
+            case 'i': this.currentIndex = (this.currentIndex - this.cols + this.palette.size) % this.palette.size; break;
+            case 'k': this.currentIndex = (this.currentIndex + this.cols) % this.palette.size; break;
+            case 'j': this.currentIndex = (this.currentIndex - 1 + this.palette.size) % this.palette.size; break;
+            case 'l': this.currentIndex = (this.currentIndex + 1) % this.palette.size; break;
         }
         this.updateUI();
     }
 
     apply() {
         const shift = this.currentIndex - this.startingIndex;
-        this.store.shiftSelectedColors(shift, 80);
+        this.store.shiftSelectedColors(shift, this.palette.size);
         this.palette.currentIndex = this.currentIndex;
     }
 
@@ -966,6 +1060,49 @@ class ColorContext {
                 cell.classList.remove('current');
             }
         });
+    }
+}
+
+class PaletteEditContext {
+    constructor(palette, store) {
+        this.palette = palette;
+        this.store = store;
+        this.active = false;
+        this.selection = null; // { start, end } or null
+        this.onPaletteChanged = null; // callback to re-upload to GPU
+    }
+
+    get size() { return this.palette.size; }
+
+    enter() {
+        this.active = true;
+        this.selection = null;
+    }
+
+    exit() {
+        this.active = false;
+        this.selection = null;
+    }
+
+    // Select a range of palette indices [start, end] inclusive
+    selectRange(start, end) {
+        const s = this.size;
+        start = Math.max(0, Math.min(s - 1, start));
+        end   = Math.max(0, Math.min(s - 1, end));
+        if (start > end) [start, end] = [end, start];
+        this.selection = { start, end };
+    }
+
+    selectAll() {
+        this.selection = { start: 0, end: this.size - 1 };
+    }
+
+    deleteSelection() {
+        if (!this.selection) return;
+        const { start, end } = this.selection;
+        this.palette.deleteRange(start, end, this.store);
+        this.selection = null;
+        if (this.onPaletteChanged) this.onPaletteChanged();
     }
 }
 
@@ -1375,6 +1512,7 @@ class CommandExecutor {
         this.colorContext = new ColorContext(store, palette);
         this.cameraContext = new CameraContext(camera);
         this.selectionContext = new FrameSelectionContext(store);
+        this.paletteEditContext = new PaletteEditContext(palette, store);
         this.commandTree = new CommandTree();
 
         this.animationActive = false;
@@ -1382,6 +1520,7 @@ class CommandExecutor {
         this.animationInterval = 200;
         this.animationLastTime = 0;
         this.animationColorStep = 1;
+        this.animGlobalPhase = 0.0;
 
         this.lineHW  = 0.018;  // half-width (thickness)
         this.lineExt = 0.125;  // extension past corners (min 0)
@@ -1509,6 +1648,34 @@ class CommandExecutor {
                 continue;
             }
 
+            // P(...): palette edit sub-context — parse contents inline
+            if (!this.paletteEditContext.active && key === 'P' && expanded[i + 1] === '(') {
+                i += 2; // skip P and (
+                this.paletteEditContext.enter();
+                while (i < expanded.length && expanded[i] !== ')') {
+                    const pk = expanded[i];
+                    // #[n] or #[n:m] range select
+                    if (pk === '#' && expanded[i + 1] === '[') {
+                        i += 2; // skip # and [
+                        let rangeText = '';
+                        while (i < expanded.length && expanded[i] !== ']') {
+                            rangeText += expanded[i];
+                            i++;
+                        }
+                        i++; // consume ]
+                        this._paletteApplyRange(rangeText);
+                        continue;
+                    }
+                    if (pk === 'a') { this.paletteEditContext.selectAll(); i++; continue; }
+                    if (pk === 'x') { this.paletteEditContext.deleteSelection(); i++; continue; }
+                    i++;
+                }
+                this.paletteEditContext.exit();
+                i++; // consume )
+                this.commandTree.addCommand(`P(...)`);
+                continue;
+            }
+
             if (this.colorContext.active) {
                 this.handleColorContextNavigation(key);
             } else if (this.cameraContext.active) {
@@ -1557,6 +1724,12 @@ class CommandExecutor {
         // Selection context
         if (this.selectionContext.active) {
             return this.handleSelectionContextNavigation(key, shift);
+        }
+
+        // Palette edit context
+        if (this.paletteEditContext.active) {
+            if (this.paletteEditContext.bracketInputActive) return;
+            return this.handlePaletteEditContextNavigation(key);
         }
 
         // n key: repeat last compound command
@@ -1710,6 +1883,11 @@ class CommandExecutor {
                 this.commandTree.addCommand(key);
                 break;
 
+            case 'P':
+                this.paletteEditContext.enter();
+                this.commandTree.addCommand('P(');
+                break;
+
             case '#':
                 this.selectionContext.enter();
                 this.commandTree.addCommand(key);
@@ -1745,6 +1923,7 @@ class CommandExecutor {
             case '5':
             case '6':
                 this.currentView = parseInt(key);
+                this.cameraContext.selectView(parseInt(key));
                 this.commandTree.addCommand(key);
                 break;
 
@@ -1828,7 +2007,9 @@ class CommandExecutor {
         const ctx = this.cameraContext;
 
         if (['0','1','2','3','4','5','6','7','8','9'].includes(key)) {
-            ctx.selectView(parseInt(key));
+            const n = parseInt(key);
+            ctx.selectView(n);
+            if (n >= 1 && n <= 6) this.currentView = n;
             this.commandTree.addCommand(key);
             return;
         }
@@ -2000,15 +2181,14 @@ class CommandExecutor {
 
     updateAnimation(now) {
         if (!this.animationActive) return;
-        if (now - this.animationLastTime >= this.animationInterval) {
-            this.store.animateAllColors(this.animationColorStep, 8, 80);
-            this.animationLastTime += this.animationInterval;
-            // If we've fallen behind by more than one interval, resync
-            if (now - this.animationLastTime > this.animationInterval) {
-                this.animationLastTime = now;
-            }
-        }
+        const delta = now - this.animationLastTime;
+        this.animationLastTime = now;
+        // Advance global phase continuously; one palette step per animationInterval ms
+        const advance = (delta / this.animationInterval) * this.animationColorStep * this.animationDirection;
+        this.animGlobalPhase = (this.animGlobalPhase + advance + this.palette.size * 1000) % this.palette.size;
     }
+
+    get animTime() { return this.animationActive ? this.animGlobalPhase : 0.0; }
 
     handleTranslate(key) {
         const step = this.gridSize;
@@ -2356,13 +2536,15 @@ class CommandExecutor {
         this.mode = 'normal';
         this.cornerIndex = 0;
         this.animationActive = false;
+        this.animGlobalPhase = 0.0;
         this.lineHW  = 0.018;
         this.lineExt = 0.125;
         if (this.gpuLineUpdate) this.gpuLineUpdate(this.lineHW, this.lineExt);
         // Exit any active contexts
-        if (this.colorContext.active)    this.colorContext.exit();
-        if (this.cameraContext.active)   this.cameraContext.exit();
-        if (this.selectionContext.active) this.selectionContext.exit();
+        if (this.colorContext.active)       this.colorContext.exit();
+        if (this.cameraContext.active)      this.cameraContext.exit();
+        if (this.selectionContext.active)   this.selectionContext.exit();
+        if (this.paletteEditContext.active) this.paletteEditContext.exit();
         // Reset camera to default
         const cam = this.camera;
         cam.theta = Math.PI / 4; cam.phi = Math.PI / 6; cam.dist = 30;
@@ -2377,6 +2559,62 @@ class CommandExecutor {
         } else {
             this.store.setContentsSelected(text);
         }
+    }
+
+    // Parse "n" or "n:m" and apply to paletteEditContext
+    _paletteApplyRange(rangeText) {
+        const parts = rangeText.split(':').map(s => parseInt(s.trim()));
+        const start = parts[0];
+        const end = parts.length > 1 ? parts[1] : parts[0];
+        this.paletteEditContext.selectRange(start, end);
+    }
+
+    handlePaletteEditContextNavigation(key) {
+        const ctx = this.paletteEditContext;
+        if (key === '#') {
+            // open bracket input for range — handled inline during replay,
+            // handled interactively via bracket overlay
+            this._paletteOpenBracketInput();
+            this.commandTree.addCommand(key);
+            return;
+        }
+        if (key === 'a') {
+            ctx.selectAll();
+            this.commandTree.addCommand(key);
+            return;
+        }
+        if (key === 'x') {
+            ctx.deleteSelection();
+            this.commandTree.addCommand(key);
+            return;
+        }
+        if (key === ')' || key === 'Escape') {
+            ctx.exit();
+            this.mode = 'normal';
+            this.commandTree.addCommand(')');
+            return;
+        }
+    }
+
+    _paletteOpenBracketInput() {
+        const overlay = document.getElementById('palette-bracket-overlay');
+        const input = document.getElementById('palette-bracket-input');
+        if (!overlay || !input) return;
+        overlay.classList.add('active');
+        input.value = '';
+        input.focus();
+        this.paletteEditContext.bracketInputActive = true;
+    }
+
+    _paletteCloseBracketInput() {
+        const overlay = document.getElementById('palette-bracket-overlay');
+        if (overlay) overlay.classList.remove('active');
+        if (this.paletteEditContext) this.paletteEditContext.bracketInputActive = false;
+    }
+
+    _paletteSubmitBracketInput(text) {
+        this._paletteApplyRange(text);
+        this._paletteCloseBracketInput();
     }
 }
 
@@ -2420,39 +2658,6 @@ function mat4Mul(out, a, b) {
   for(let i=0;i<4;i++) for(let j=0;j<4;j++)
     out[j*4+i]=a[i]*b[j*4]+a[4+i]*b[j*4+1]+a[8+i]*b[j*4+2]+a[12+i]*b[j*4+3];
 }
-
-// ============================================================
-// 80-COLOR PALETTE - Checks EightyColors
-// https://etherscan.io/address/0x036721e5A769Cc48B3189EFbb9ccE4471E8A48B1
-// ============================================================
-function buildPalette() {
-  const hexColors = [
-    'E84AA9', 'F2399D', 'DB2F96', 'E73E85', 'FF7F8E', 'FA5B67', 'E8424E', 'D5332F',
-    'C23532', 'F2281C', 'D41515', '9D262F', 'DE3237', 'DA3321', 'EA3A2D', 'EB4429',
-    'EC7368', 'FF8079', 'FF9193', 'EA5B33', 'D05C35', 'ED7C30', 'EF9933', 'EF8C37',
-    'F18930', 'F09837', 'F9A45C', 'F2A43A', 'F2A840', 'F2A93C', 'FFB340', 'F2B341',
-    'FAD064', 'F7CA57', 'F6CB45', 'FFAB00', 'F4C44A', 'FCDE5B', 'F9DA4D', 'F9DA4A',
-    'FAE272', 'F9DB49', 'FAE663', 'FBEA5B', 'A7CA45', 'B5F13B', '94E337', '63C23C',
-    '86E48E', '77E39F', '5FCD8C', '83F1AE', '9DEFBF', '2E9D9A', '3EB8A1', '5FC9BF',
-    '77D3DE', '6AD1DE', '5ABAD3', '4291A8', '33758D', '45B2D3', '81D1EC', 'A7DDF9',
-    '9AD9FB', 'A4C8EE', '60B1F4', '2480BD', '4576D0', '3263D0', '2E4985', '25438C',
-    '525EAA', '3D43B3', '322F92', '4A2387', '371471', '3B088C', '6C31D7', '9741DA'
-  ];
-
-  const c = new Float32Array(80 * 4);
-  for (let i = 0; i < 80; i++) {
-    const hex = hexColors[i];
-    const r = parseInt(hex.substring(0, 2), 16) / 255;
-    const g = parseInt(hex.substring(2, 4), 16) / 255;
-    const b = parseInt(hex.substring(4, 6), 16) / 255;
-    c[i*4] = r;
-    c[i*4+1] = g;
-    c[i*4+2] = b;
-    c[i*4+3] = 1;
-  }
-  return c;
-}
-const PALETTE_DATA = buildPalette();
 
 // ============================================================
 // VIEW PLANES
@@ -2517,6 +2722,8 @@ struct Uniforms {
   viewProj: mat4x4<f32>,
   cursor: vec3<f32>,
   showCursor: f32,
+  paletteSize: u32,
+  animTime: f32,
 };
 
 struct Instance {
@@ -2552,7 +2759,10 @@ struct V2F { @builtin(position) pos: vec4<f32>, @location(0) col: vec4<f32> };
   var o: V2F;
   o.pos = u.viewProj * vec4<f32>(p, 1.0);
 
-  var c = palette[inst.colorIdx % 80u];
+  let phase = f32(inst.colorIdx % u.paletteSize) + u.animTime;
+  let ci = u32(phase) % u.paletteSize;
+  let cn = (ci + 1u) % u.paletteSize;
+  var c = mix(palette[ci], palette[cn], fract(phase));
   if ((inst.flags & 1u) != 0u) { c = mix(c, vec4<f32>(1.0,1.0,1.0,1.0), 0.4); }
   o.col = c;
   return o;
@@ -2763,10 +2973,11 @@ async function main() {
   const instanceBuf = device.createBuffer({ size: maxBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   const visibleBuf = device.createBuffer({ size: MAX_INSTANCES * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   const indirectBuf = device.createBuffer({ size: 20, usage: GPUBufferUsage.INDIRECT | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
-  const paletteBuf = device.createBuffer({ size: PALETTE_DATA.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-  device.queue.writeBuffer(paletteBuf, 0, PALETTE_DATA);
+  const MAX_PALETTE_COLORS = 80;
+  const paletteBuf = device.createBuffer({ size: MAX_PALETTE_COLORS * 4 * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+  device.queue.writeBuffer(paletteBuf, 0, palette.toFloat32Array());
 
-  const uniformBuf = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const uniformBuf = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const cullUniformBuf = device.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const readbackBuf = device.createBuffer({ size: 20, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
 
@@ -2854,6 +3065,11 @@ async function main() {
     const geo = buildFrameGeo(hw, ext);
     device.queue.writeBuffer(frameVB, 0, geo.verts);
   };
+  executor.paletteEditContext.onPaletteChanged = () => {
+    const data = palette.toFloat32Array();
+    device.queue.writeBuffer(paletteBuf, 0, data);
+    buildPaletteGrid(palette);
+  };
 
   // Auto-execute: when loaded as an on-chain token the renderer injects
   // `let autoExecuteCommand = '...'` before this script runs.
@@ -2871,16 +3087,21 @@ async function main() {
   }
 
   // Build palette grid
-  const paletteGrid = document.getElementById('palette-grid');
-  for (let i = 0; i < 80; i++) {
-    const cell = document.createElement('div');
-    cell.className = 'palette-cell';
-    const r = (PALETTE_DATA[i*4] * 255)|0;
-    const g = (PALETTE_DATA[i*4+1] * 255)|0;
-    const b = (PALETTE_DATA[i*4+2] * 255)|0;
-    cell.style.background = `rgb(${r},${g},${b})`;
-    paletteGrid.appendChild(cell);
+  function buildPaletteGrid(pal) {
+    const paletteGrid = document.getElementById('palette-grid');
+    paletteGrid.innerHTML = '';
+    const data = pal.toFloat32Array();
+    for (let i = 0; i < pal.size; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'palette-cell';
+      const r = (data[i*4] * 255)|0;
+      const g = (data[i*4+1] * 255)|0;
+      const b = (data[i*4+2] * 255)|0;
+      cell.style.background = `rgb(${r},${g},${b})`;
+      paletteGrid.appendChild(cell);
+    }
   }
+  buildPaletteGrid(palette);
 
   // Command bar controls
   const commandInput = document.getElementById('command-input');
@@ -2893,6 +3114,8 @@ async function main() {
     if (cmd) {
       store.clear();
       palette.reset();
+      device.queue.writeBuffer(paletteBuf, 0, palette.toFloat32Array());
+      buildPaletteGrid(palette);
       executor.resetAll();
       mintCommandString = cmd;
       executor.executeCommandString(cmd);
@@ -2907,6 +3130,17 @@ async function main() {
       e.preventDefault();
       executor.selectionContext.closeBracketInput();
     }
+  });
+
+  document.getElementById('palette-bracket-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      executor._paletteSubmitBracketInput(e.target.value);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      executor._paletteCloseBracketInput();
+    }
+    e.stopPropagation();
   });
 
   document.getElementById('slash-input').addEventListener('keydown', e => {
@@ -2934,6 +3168,8 @@ async function main() {
       if (cmd) {
         store.clear();
         palette.reset();
+        device.queue.writeBuffer(paletteBuf, 0, palette.toFloat32Array());
+        buildPaletteGrid(palette);
         executor.resetAll();
         mintCommandString = cmd;
         executor.executeCommandString(cmd);
@@ -3066,10 +3302,14 @@ async function main() {
     cam.fov = executor.cameraContext.fov;
     cam.update(aspect);
 
-    const uniformData = new Float32Array(20);
-    uniformData.set(cam.vp, 0);
-    uniformData[16] = executor.cursor.x; uniformData[17] = executor.cursor.y; uniformData[18] = executor.cursor.z;
-    uniformData[19] = showUI ? 1 : 0;
+    const uniformData = new ArrayBuffer(96);
+    const uniformF32 = new Float32Array(uniformData);
+    const uniformU32 = new Uint32Array(uniformData);
+    uniformF32.set(cam.vp, 0);
+    uniformF32[16] = executor.cursor.x; uniformF32[17] = executor.cursor.y; uniformF32[18] = executor.cursor.z;
+    uniformF32[19] = showUI ? 1 : 0;
+    uniformU32[20] = palette.size;
+    uniformF32[21] = executor.animTime;
     device.queue.writeBuffer(uniformBuf, 0, uniformData);
 
     const planes = extractFrustumPlanes(cam.vp);
@@ -3097,7 +3337,7 @@ async function main() {
       colorAttachments: [{
         view: msaaTex.createView(),
         resolveTarget: tv,
-        clearValue: { r:0.035, g:0.035, b:0.05, a:1 },
+        clearValue: { r:0.071, g:0.078, b:0.102, a:1 },
         loadOp:'clear', storeOp:'discard',
       }],
       depthStencilAttachment: { view: depthTex.createView(), depthClearValue: 1, depthLoadOp:'clear', depthStoreOp:'discard' },
@@ -3148,6 +3388,7 @@ async function main() {
       if (executor.colorContext.active) modeText = 'color';
       if (executor.cameraContext.active) modeText = 'camera';
       if (executor.selectionContext.active) modeText = 'selection';
+      if (executor.paletteEditContext.active) modeText = `palette (${palette.size} colors)`;
       if (executor.commandTree.inCommandContext) modeText = 'command';
       if (executor.animationActive) modeText += ` (animating  step:${executor.animationColorStep}  interval:${executor.animationInterval}ms)`;
 
