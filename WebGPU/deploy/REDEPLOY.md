@@ -73,18 +73,9 @@ forge script script/DeployRenderer.s.sol \
 
 ## Step 5 — Register the renderer on your collection
 
-Do this from the **collection owner wallet** (not the deployer wallet above unless they match).
+Do this from the **collection owner wallet** — this is a **different key** than the deployer in `.env`. Do not use the register script with the deploy key.
 
-Option A — use the register script (owner wallet must match PRIVATE_KEY):
-```bash
-export RENDERER_ADDRESS=0x...   # from Step 4
-export COLLECTION_ADDRESS=0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40
-
-npm run register
-# Logs: Renderer registered at index: N
-```
-
-Option B — call `registerRenderer(rendererAddress)` directly via Etherscan/Rabby.
+Call `registerRenderer(rendererAddress)` directly via Etherscan/Rabby from the owner wallet.
 
 ---
 
@@ -108,6 +99,7 @@ In `frameworks-v4-mint.html`, update the Collection Config defaults:
 | v4 | `frameworks_v4_mint_v4.html` | `0xE958203177Cc654d0Af06E2E23d606F274E935a2` | 4 (pending registration) | s/S scale+line rework; frame selection system; h/H hide; q corner replay fix; default scale 2; command replay headless |
 | v5 | `frameworks_v4_viewer_v1.html` | `0x76E477Fd9f966520c553cc2Eb6056BCB2636A58c` | 5 (pending registration) | Split viewer/mint: viewer has full interactivity minus ethers/wallet/mint panel; w/W text labels; Tab label toggle; mintCommandString populated on auto-execute |
 | v6 | `frameworks_v4_viewer_v2.html` | `0x358a5a7A0d8f23B52A86Dd1fbA3BBB358227A250` | 6 (pending registration) | Minified (112KB→62KB); q corner reset fix; e/E proper reflection; C snap cursor to selection; / command overlay; ? shows original command; full reset on execute |
+| v7 | `frameworks_v4_viewer_v3.html` | `0x78DA5Ad98D4c1C724E94e1bf429D900a7BACce31` | 7 (pending registration) | Smooth GPU-side color animation via continuous global phase; dynamic palette size; background #12141a; view/camera sync; HUD fix; palette edit system P(#[n:m]x) |
 
 Collection: `0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40` (Sepolia)
 EthFS FileStore: `0xFe1411d6864592549AdE050215482e4385dFa0FB` (all networks)
