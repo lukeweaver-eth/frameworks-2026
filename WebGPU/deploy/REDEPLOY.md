@@ -105,7 +105,8 @@ In `frameworks-v4-mint.html`, update the Collection Config defaults:
 | v10 | `frameworks_v4_viewer_v6.html` | `0x8cC9E7c0306d9A6F512E414cC9e050d705e2A61D` | — (superseded) | join_vars: false insufficient; compress still reordered paletteBuf init before palette decl |
 | v11 | `frameworks_v4_viewer_v7.html` | `0xD9c7af587564C74f98986818020171667Fdcd202` | — (superseded) | Source bug: palette used before declaration (paletteBuf write at line 2978, palette declared at 3060) |
 | v12 | `frameworks_v4_viewer_v8.html` | `0xEaB332A2f9802A4eCd73Fa249075F18ac90E6408` | — (superseded) | Still failing — error persists despite source fix |
-| v13 | `frameworks_v4_viewer_v9.html` | `0x0cFDF2AFDDDc40864fFbAE2559C7e496B4b8d348` | 13 (pending registration) | Raw unminified HTML uploaded directly; bypasses all minifier issues |
+| v13 | `frameworks_v4_viewer_v9.html` | `0x0cFDF2AFDDDc40864fFbAE2559C7e496B4b8d348` | — (superseded) | Proxy double-loads script causing "already declared" — raw HTML same issue |
+| v14 | `frameworks_v4_viewer_v10.html` | `0xe74777d41B1ad9834Dd8E89f2F6ed98CaE6cF2F7` | 14 (pending registration) | Wrap entire script in IIFE so class declarations are function-scoped, not re-declarable |
 
 Collection: `0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40` (Sepolia)
 EthFS FileStore: `0xFe1411d6864592549AdE050215482e4385dFa0FB` (all networks)

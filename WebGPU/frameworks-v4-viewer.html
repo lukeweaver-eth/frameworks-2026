@@ -188,6 +188,7 @@ canvas { display: block; width: 100vw; height: 100vh; }
 <canvas id="label-canvas"></canvas>
 
 <script>
+(function() {
 // ============================================================
 // FRAME STORE — Typed array backend from frame-store.js
 // 64-byte per-instance layout
@@ -3440,6 +3441,7 @@ main().catch(e => {
   document.getElementById('error-msg').style.display='block';
   document.getElementById('error-msg').textContent=e.message;
 });
+})();
 </script>
 </body>
 </html>
