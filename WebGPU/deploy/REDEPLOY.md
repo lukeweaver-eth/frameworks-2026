@@ -73,9 +73,11 @@ forge script script/DeployRenderer.s.sol \
 
 ## Step 5 — Register the renderer on your collection
 
-Do this from the **collection owner wallet** — this is a **different key** than the deployer in `.env`. Do not use the register script with the deploy key.
+The **collection owner wallet is different from the deployer wallet** in `.env`. Registration must be done manually via Etherscan or Rabby — the `npm run register` script won't work here.
 
-Call `registerRenderer(rendererAddress)` directly via Etherscan/Rabby from the owner wallet.
+Call `registerRenderer(rendererAddress)` on the collection contract via Etherscan/Rabby using the owner wallet:
+- Collection: `0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40`
+- Arg: renderer address from Step 4
 
 ---
 
@@ -99,14 +101,7 @@ In `frameworks-v4-mint.html`, update the Collection Config defaults:
 | v4 | `frameworks_v4_mint_v4.html` | `0xE958203177Cc654d0Af06E2E23d606F274E935a2` | 4 (pending registration) | s/S scale+line rework; frame selection system; h/H hide; q corner replay fix; default scale 2; command replay headless |
 | v5 | `frameworks_v4_viewer_v1.html` | `0x76E477Fd9f966520c553cc2Eb6056BCB2636A58c` | 5 (pending registration) | Split viewer/mint: viewer has full interactivity minus ethers/wallet/mint panel; w/W text labels; Tab label toggle; mintCommandString populated on auto-execute |
 | v6 | `frameworks_v4_viewer_v2.html` | `0x358a5a7A0d8f23B52A86Dd1fbA3BBB358227A250` | 6 (pending registration) | Minified (112KB→62KB); q corner reset fix; e/E proper reflection; C snap cursor to selection; / command overlay; ? shows original command; full reset on execute |
-| v7 | `frameworks_v4_viewer_v3.html` | `0x78DA5Ad98D4c1C724E94e1bf429D900a7BACce31` | — (superseded) | Smooth GPU-side color animation via continuous global phase — broken by terser class name mangling |
-| v8 | `frameworks_v4_viewer_v4.html` | `0xDC7370E16498B6ffa91B26C57bF0df3AF28d414c` | — (superseded) | keep_classnames only — still mangles local vars, still broken |
-| v9 | `frameworks_v4_viewer_v5.html` | `0xb676Db61D4731d46A18ab632260Fc9d705d38c10` | — (superseded) | mangle: false only — terser join_vars still merged const declarations causing palette TDZ |
-| v10 | `frameworks_v4_viewer_v6.html` | `0x8cC9E7c0306d9A6F512E414cC9e050d705e2A61D` | — (superseded) | join_vars: false insufficient; compress still reordered paletteBuf init before palette decl |
-| v11 | `frameworks_v4_viewer_v7.html` | `0xD9c7af587564C74f98986818020171667Fdcd202` | — (superseded) | Source bug: palette used before declaration (paletteBuf write at line 2978, palette declared at 3060) |
-| v12 | `frameworks_v4_viewer_v8.html` | `0xEaB332A2f9802A4eCd73Fa249075F18ac90E6408` | — (superseded) | Still failing — error persists despite source fix |
-| v13 | `frameworks_v4_viewer_v9.html` | `0x0cFDF2AFDDDc40864fFbAE2559C7e496B4b8d348` | — (superseded) | Proxy double-loads script causing "already declared" — raw HTML same issue |
-| v14 | `frameworks_v4_viewer_v10.html` | `0xe74777d41B1ad9834Dd8E89f2F6ed98CaE6cF2F7` | 14 (pending registration) | Wrap entire script in IIFE so class declarations are function-scoped, not re-declarable |
+| v7 | `frameworks_v4_viewer_v3.html` | `0x78DA5Ad98D4c1C724E94e1bf429D900a7BACce31` | 7 (pending registration) | Continuous GPU-side color animation (animGlobalPhase); palette editing (P(#[n:m]x)); background #12141a; view/camera sync (1-6 keys); HUD fix |
 
 Collection: `0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40` (Sepolia)
 EthFS FileStore: `0xFe1411d6864592549AdE050215482e4385dFa0FB` (all networks)
