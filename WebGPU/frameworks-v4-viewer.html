@@ -3056,8 +3056,8 @@ async function main() {
   resize();
 
   // App state
-  const store = new FrameStore();
   const palette = new PaletteManager();
+  const store = new FrameStore();
   const cam = new Camera(canvas);
   const executor = new CommandExecutor(store, palette, cam);
   executor.onNameWritten = () => { showLabels = true; };
