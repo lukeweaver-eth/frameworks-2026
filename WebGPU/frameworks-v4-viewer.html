@@ -2974,6 +2974,7 @@ async function main() {
   const instanceBuf = device.createBuffer({ size: maxBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   const visibleBuf = device.createBuffer({ size: MAX_INSTANCES * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   const indirectBuf = device.createBuffer({ size: 20, usage: GPUBufferUsage.INDIRECT | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+  const palette = new PaletteManager();
   const MAX_PALETTE_COLORS = 80;
   const paletteBuf = device.createBuffer({ size: MAX_PALETTE_COLORS * 4 * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   device.queue.writeBuffer(paletteBuf, 0, palette.toFloat32Array());
@@ -3057,7 +3058,6 @@ async function main() {
   resize();
 
   // App state
-  const palette = new PaletteManager();
   const store = new FrameStore();
   const cam = new Camera(canvas);
   const executor = new CommandExecutor(store, palette, cam);

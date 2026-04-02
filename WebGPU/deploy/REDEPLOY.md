@@ -102,6 +102,10 @@ In `frameworks-v4-mint.html`, update the Collection Config defaults:
 | v5 | `frameworks_v4_viewer_v1.html` | `0x76E477Fd9f966520c553cc2Eb6056BCB2636A58c` | 5 (pending registration) | Split viewer/mint: viewer has full interactivity minus ethers/wallet/mint panel; w/W text labels; Tab label toggle; mintCommandString populated on auto-execute |
 | v6 | `frameworks_v4_viewer_v2.html` | `0x358a5a7A0d8f23B52A86Dd1fbA3BBB358227A250` | 6 (pending registration) | Minified (112KB→62KB); q corner reset fix; e/E proper reflection; C snap cursor to selection; / command overlay; ? shows original command; full reset on execute |
 | v7 | `frameworks_v4_viewer_v3.html` | `0x78DA5Ad98D4c1C724E94e1bf429D900a7BACce31` | 7 (pending registration) | Continuous GPU-side color animation (animGlobalPhase); palette editing (P(#[n:m]x)); background #12141a; view/camera sync (1-6 keys); HUD fix |
+| v8–v10 | (various) | (various) | 8–10 (not registered) | Failed: terser class mangling + join_vars TDZ |
+| v11–v14 | (various) | (various) | 11–14 (not registered) | Failed: palette declared after paletteBuf use; wrong source fix; raw HTML upload; IIFE wrap |
+| v15 | `frameworks_v4_viewer_v11.html` | `0xFd2003545B0c25aFE4E92DB866BEd105F75F3AEe` | 15 (not registered) | Missing IIFE — double-declaration error in proxy |
+| v16 | `frameworks_v4_viewer_v12.html` | `0x67A5395945Dd99c88c2F3F978056aF354b0E7511` | 16 (pending registration) | Fix palette TDZ + IIFE wrap; raw unminified upload |
 
 Collection: `0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40` (Sepolia)
 EthFS FileStore: `0xFe1411d6864592549AdE050215482e4385dFa0FB` (all networks)

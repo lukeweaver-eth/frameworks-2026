@@ -8,17 +8,11 @@ This is the **WebGPU port** (V4) of Frameworks V3 — a spatial content structur
 
 No build step. All files are standalone HTML or plain JS modules. Open in Chrome 113+ or Edge 113+ (WebGPU required).
 
-## Current State
+## Two-File Architecture
 
-The migration has been executed in four incremental steps:
-
-| File | Status | What it adds |
-|------|--------|--------------|
-| `frameworks-scaled (1).html` | Original prototype | WebGPU renderer, compute culling, MSAA, orbital camera, stress test — uses **48-byte quaternion layout** |
-| `frameworks-v4-step1.html` | FrameStore integrated | Swaps quaternion layout → 64-byte basis layout; integrates `frame-store.js` |
-| `frameworks-v4-step2.html` | CommandExecutor ported | Keyboard commands (`f`, `d`, `t`/`ijkl`, `r`, `R`, `e`, `E`, `a`, `A`, `z`, `x`) wired to FrameStore |
-| `frameworks-v4-step3.html` | Contexts + animation | ColorContext, CameraContext, animation mode |
-| `frameworks-v4-step4.html` | Command string replay | Full command string input bar, V3 parity test |
+- **`frameworks-v4-mint.html`** — local builder. Has ethers CDN, wallet connect, Mint panel. Never uploaded to EthFS.
+- **`frameworks-v4-viewer.html`** — on-chain artifact. Full interactivity (all keyboard commands, command bar, export) minus the chain-interaction buttons. This is what gets minified, gzipped, and uploaded to EthFS. The renderer contract serves this to token holders.
+- **`frameworks-v4-viewer.js`** — extracted JS from viewer HTML, wrapped in IIFE; minified + gzipped to ~12KB for EthFS upload.
 
 `frameworks-3.1.3-combined.js` is the V3 reference implementation (Three.js-based). `modules/` contains minified V3 modules for drop-in reuse.
 
@@ -125,11 +119,48 @@ var p = basis * (local_pos * inst.scale);
 ### Dirty tracking scope
 `getDirtyRange()` returns a byte-offset range for `writeBuffer`. Only upload the dirty range — at 1M frames this is the difference between uploading 64MB/frame vs. ~320 bytes after a 5-frame translate.
 
+## Deployment (from `deploy/` directory)
+
+All deploy commands run from `deploy/`. Requires `.env` with `PRIVATE_KEY` and `ETH_RPC_URL`.
+
+**When viewer JS changes** (`frameworks-v4-viewer.js`) → Steps 1–4 below.
+**When only renderer contract changes** → Steps 2–4.
+**When only builder HTML changes** → no redeploy needed.
+
+```bash
+# Step 1: Bump version in upload-to-ethfs.mjs, FrameworksRendererV4.sol, and package.json
+# (EthFS files are immutable by name — each upload needs a new name like _v8)
+
+# Step 2: Minify + gzip viewer
+npm run minify
+# Output: viewer/frameworks_v4_viewer_vN.min.js.gz (~12KB)
+
+# Step 3: Upload to EthFS
+export PRIVATE_KEY=0x...
+export ETH_RPC_URL=https://sepolia.infura.io/v3/...
+npm run upload
+
+# Step 4: Deploy renderer contract
+forge script script/DeployRenderer.s.sol --rpc-url $ETH_RPC_URL --private-key $PRIVATE_KEY --broadcast
+
+# Step 5: Register renderer — must use OWNER wallet (different from deployer), via Etherscan/Rabby
+# Call: registerRenderer(rendererAddress) on collection 0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40
+
+# Step 6: Update mint-renderer-idx in frameworks-v4-mint.html to new index
+```
+
+**Key addresses (Sepolia):**
+- Collection: `0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40`
+- EthFS FileStore: `0xFe1411d6864592549AdE050215482e4385dFa0FB`
+- ScriptyBuilderV2: `0xD7587F110E08F4D120A231bA97d3B577A81Df022`
+- Latest renderer (v7): `0x78DA5Ad98D4c1C724E94e1bf429D900a7BACce31` at index 7
+
+See `deploy/REDEPLOY.md` for full deployment history and versioning steps.
+
 ## Remaining Work (Phase 3–4)
 
 - Modular refactor: extract `gpu/`, `core/`, `camera/`, `commands/`, `contexts/` per `ARCHITECTURE.md`
 - Corner cycling (`q` command, per `CORNER_SYSTEM.md`)
-- Compound command input overlay (`/` key)
 - `n` key repeat conversion
 - View indicator overlay (colored cube showing active working plane)
 - Save/load (URL hash, localStorage, command string export)
