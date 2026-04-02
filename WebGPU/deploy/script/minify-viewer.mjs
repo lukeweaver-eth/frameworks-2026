@@ -20,7 +20,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const INPUT  = join(__dirname, '..', '..', 'frameworks-v4-viewer.html');
 const OUTDIR = join(__dirname, '..', 'viewer');
-const OUTPUT = join(OUTDIR, 'frameworks_v4_viewer_v5.min.html');
+const OUTPUT = join(OUTDIR, 'frameworks_v4_viewer_v6.min.html');
 
 async function main() {
   console.log('Reading:', INPUT);
@@ -41,7 +41,7 @@ async function main() {
 
   // Minify JS
   const result = await minify(js, {
-    compress: { passes: 2 },
+    compress: { passes: 2, join_vars: false },
     mangle: false,
     format: { comments: false },
   });

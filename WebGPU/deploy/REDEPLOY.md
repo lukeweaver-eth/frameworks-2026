@@ -101,7 +101,8 @@ In `frameworks-v4-mint.html`, update the Collection Config defaults:
 | v6 | `frameworks_v4_viewer_v2.html` | `0x358a5a7A0d8f23B52A86Dd1fbA3BBB358227A250` | 6 (pending registration) | Minified (112KB→62KB); q corner reset fix; e/E proper reflection; C snap cursor to selection; / command overlay; ? shows original command; full reset on execute |
 | v7 | `frameworks_v4_viewer_v3.html` | `0x78DA5Ad98D4c1C724E94e1bf429D900a7BACce31` | — (superseded) | Smooth GPU-side color animation via continuous global phase — broken by terser class name mangling |
 | v8 | `frameworks_v4_viewer_v4.html` | `0xDC7370E16498B6ffa91B26C57bF0df3AF28d414c` | — (superseded) | keep_classnames only — still mangles local vars, still broken |
-| v9 | `frameworks_v4_viewer_v5.html` | `0xb676Db61D4731d46A18ab632260Fc9d705d38c10` | 9 (pending registration) | Disable mangle entirely (mangle: false); no more TDZ errors |
+| v9 | `frameworks_v4_viewer_v5.html` | `0xb676Db61D4731d46A18ab632260Fc9d705d38c10` | — (superseded) | mangle: false only — terser join_vars still merged const declarations causing palette TDZ |
+| v10 | `frameworks_v4_viewer_v6.html` | `0x8cC9E7c0306d9A6F512E414cC9e050d705e2A61D` | 10 (pending registration) | join_vars: false fixes const merging; mangle: false; stable from here |
 
 Collection: `0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40` (Sepolia)
 EthFS FileStore: `0xFe1411d6864592549AdE050215482e4385dFa0FB` (all networks)
