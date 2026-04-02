@@ -20,7 +20,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const INPUT  = join(__dirname, '..', '..', 'frameworks-v4-viewer.html');
 const OUTDIR = join(__dirname, '..', 'viewer');
-const OUTPUT = join(OUTDIR, 'frameworks_v4_viewer_v3.min.html');
+const OUTPUT = join(OUTDIR, 'frameworks_v4_viewer_v13.min.html');
 
 async function main() {
   console.log('Reading:', INPUT);
@@ -40,9 +40,11 @@ async function main() {
   console.log(`JS block: ${(js.length / 1024).toFixed(1)} KB`);
 
   // Minify JS
+  // compress: join_vars:false prevents merging const declarations (avoids TDZ reordering).
+  // mangle: keep_classnames:true prevents class rename to single letters (avoids TDZ on class refs).
   const result = await minify(js, {
-    compress: { passes: 2 },
-    mangle: true,
+    compress: { passes: 2, join_vars: false },
+    mangle: { keep_classnames: true },
     format: { comments: false },
   });
 
