@@ -10,11 +10,30 @@ No build step. All files are standalone HTML or plain JS modules. Open in Chrome
 
 ## Two-File Architecture
 
-- **`frameworks-v4-mint.html`** — local builder. Has ethers CDN, wallet connect, Mint panel. Never uploaded to EthFS.
-- **`frameworks-v4-viewer.html`** — on-chain artifact. Full interactivity (all keyboard commands, command bar, export) minus the chain-interaction buttons. This is what gets minified, gzipped, and uploaded to EthFS. The renderer contract serves this to token holders.
-- **`frameworks-v4-viewer.js`** — extracted JS from viewer HTML, wrapped in IIFE; minified + gzipped to ~12KB for EthFS upload.
+- **`frameworks-v4-mint.html`** — local builder. Has ethers CDN, wallet connect, Mint panel. Never uploaded to EthFS. **This is the source of truth** — edit here, then derive the viewer.
+- **`frameworks-v4-viewer.html`** — on-chain artifact. **Do not edit directly.** Derived from mint via `deploy/script/derive-viewer.py`. Full interactivity (all keyboard commands, command bar, export) minus chain-interaction buttons, wallet, and PNG export. Wrapped in an IIFE.
+- Minified output (~68KB) is what gets uploaded to EthFS. The renderer contract serves this to token holders.
 
 `frameworks-3.1.3-combined.js` is the V3 reference implementation (Three.js-based). `modules/` contains minified V3 modules for drop-in reuse.
+
+### Viewer derivation workflow
+
+`frameworks-v4-viewer.html` is **generated** from mint — do not hand-edit it:
+
+```bash
+# From repo root (WebGPU/)
+python3 deploy/script/derive-viewer.py
+# Runs 18+ removal/replacement passes and prints sanity-check results.
+# All checks must pass before proceeding to minify.
+```
+
+What `derive-viewer.py` removes/replaces from mint:
+- ethers CDN `<script>` tag
+- Mint panel CSS, HTML div, and toggle button
+- PNG/SVG export key handlers (`o`/`O`) and capture infrastructure
+- `buildPaletteGrid`, `mintCommandString`, mint panel DOM refs
+- `doRenderPass` refactor → simple inline render pass
+- Adds IIFE wrap around `<script>` block
 
 **Verification sequence** (tests V3 parity — should create three orthogonal frames at 90° angles):
 ```
@@ -81,7 +100,7 @@ Complete FrameStore implementation. Key methods:
 - `getDirtyRange()` / `clearDirty()` — partial GPU upload tracking
 
 ### `ARCHITECTURE.md`
-Full module breakdown for the planned modular refactor (`gpu/`, `core/`, `camera/`, `commands/`, `contexts/`, `ui/`). Reference this when splitting the step HTML files into separate modules.
+Full module breakdown for the planned modular refactor (`gpu/`, `core/`, `camera/`, `commands/`, `contexts/`, `ui/`). Reference this when splitting the step HTML files into separate modules. **Note:** `ARCHITECTURE.md` predates the 64-byte full-basis layout — it describes the old 48-byte normal+roll layout. The data model section in this CLAUDE.md is authoritative.
 
 ### `CONVERSION_PLAN (1).md`
 Detailed V3→V4 mapping. Documents which V3 modules copy verbatim (CommandTree, FrameSelectionContext, ColorContext, PaletteManager) vs. which need adaptation (CommandExecutor, CameraContext, renderer).
@@ -123,24 +142,30 @@ var p = basis * (local_pos * inst.scale);
 
 All deploy commands run from `deploy/`. Requires `.env` with `PRIVATE_KEY` and `ETH_RPC_URL`.
 
-**When viewer JS changes** (`frameworks-v4-viewer.js`) → Steps 1–4 below.
+**When mint HTML changes** → Steps 0–4 below.
 **When only renderer contract changes** → Steps 2–4.
 **When only builder HTML changes** → no redeploy needed.
 
 ```bash
-# Step 1: Bump version in upload-to-ethfs.mjs, FrameworksRendererV4.sol, and package.json
-# (EthFS files are immutable by name — each upload needs a new name like _v8)
+# Step 0: Derive viewer from mint (run from repo root WebGPU/)
+python3 deploy/script/derive-viewer.py
+# All sanity checks must print ✓ before continuing
 
-# Step 2: Minify + gzip viewer
+# Step 1: Bump version in three places (EthFS names are immutable):
+#   deploy/script/minify-viewer.mjs  → OUTPUT filename (e.g. frameworks_v4_viewer_v17.min.html)
+#   deploy/src/FrameworksRendererV4.sol → bodyTags[1].name = "frameworks_v4_viewer_v17.min.html"
+#   deploy/REDEPLOY.md → add row to deployment history
+
+# Step 2: Minify viewer (run from deploy/)
 npm run minify
-# Output: viewer/frameworks_v4_viewer_vN.min.js.gz (~12KB)
+# Output: viewer/frameworks_v4_viewer_vN.min.html (~68KB)
 
-# Step 3: Upload to EthFS
+# Step 3: Upload to EthFS (run from deploy/)
 export PRIVATE_KEY=0x...
 export ETH_RPC_URL=https://sepolia.infura.io/v3/...
 npm run upload
 
-# Step 4: Deploy renderer contract
+# Step 4: Deploy renderer contract (run from deploy/)
 forge script script/DeployRenderer.s.sol --rpc-url $ETH_RPC_URL --private-key $PRIVATE_KEY --broadcast
 
 # Step 5: Register renderer — must use OWNER wallet (different from deployer), via Etherscan/Rabby
@@ -153,9 +178,45 @@ forge script script/DeployRenderer.s.sol --rpc-url $ETH_RPC_URL --private-key $P
 - Collection: `0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40`
 - EthFS FileStore: `0xFe1411d6864592549AdE050215482e4385dFa0FB`
 - ScriptyBuilderV2: `0xD7587F110E08F4D120A231bA97d3B577A81Df022`
-- Latest renderer (v7): `0x78DA5Ad98D4c1C724E94e1bf429D900a7BACce31` at index 7
+- Latest renderer (v20): `0x20CBaD40EcE732870db8D811B524c6dA0eFA9c16` at index 20 (pending owner wallet registration)
+
+Next deploy: bump to `frameworks_v4_viewer_v17.html`, renderer index 21. EthFS filenames v4–v11 are burned (failed attempts).
 
 See `deploy/REDEPLOY.md` for full deployment history and versioning steps.
+
+### Critical: Pre-deploy checklist (verify before every upload)
+
+Two bugs that silently pass locally but break in the on-chain iframe proxy:
+
+1. **`palette` must be declared before `paletteBuf`** — check with:
+   ```bash
+   grep -n "const palette\b" frameworks-v4-viewer.html | head -1
+   grep -n "paletteBuf" frameworks-v4-viewer.html | head -1
+   # palette line number must be LOWER
+   ```
+
+2. **Script must be wrapped in an IIFE** — the proxy loads the HTML twice in the same window scope. Without it, `Identifier 'CommandExecutor' has already been declared`.
+   ```bash
+   # Line after <script> must be: (function() {
+   # Line before </script> must be: })();
+   ```
+
+### Critical: Terser flags for minification
+
+Do NOT use default terser settings. These flags are required to prevent TDZ reordering and class rename errors:
+```
+compress.join_vars: false   — prevents reordering that creates TDZ violations
+mangle.keep_classnames: true — prevents WebGPU class name mangling errors
+```
+These are already set in `deploy/script/minify-viewer.mjs`. Do not change them.
+
+## Known Performance Limitations
+
+### World-space line width (fragment-bound at large scales)
+
+Frame lines are expanded as world-space quads (`lp.z, lp.w` perp offset in the vertex shader). This means fragment cost scales with zoom level and frame scale — large frames or close camera = more screen pixels covered = more fragment + MSAA resolve work. At 127k frames, this causes ~30% fps drop when zoomed in vs. zoomed out.
+
+**Fix:** switch to screen-space line width — project the centerline first, then offset in clip/NDC space. Lines would be a fixed pixel width regardless of zoom. This is a vertex shader change only; no CPU-side changes needed.
 
 ## Remaining Work (Phase 3–4)
 

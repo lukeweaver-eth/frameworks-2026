@@ -20,7 +20,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const INPUT  = join(__dirname, '..', '..', 'frameworks-v4-viewer.html');
 const OUTDIR = join(__dirname, '..', 'viewer');
-const OUTPUT = join(OUTDIR, 'frameworks_v4_viewer_v13.min.html');
+const OUTPUT = join(OUTDIR, 'frameworks_v4_viewer_v15.min.html');
 
 async function main() {
   console.log('Reading:', INPUT);

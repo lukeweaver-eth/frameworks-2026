@@ -23,7 +23,7 @@ import { dirname, join } from 'path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const FILE_STORE_ADDRESS = '0xFe1411d6864592549AdE050215482e4385dFa0FB';
-const FILE_NAME = 'frameworks_v4_viewer_v13.html';
+const FILE_NAME = 'frameworks_v4_viewer_v16.html';
 const CHUNK_SIZE = 20000; // bytes — safely under 24KB SSTORE2 limit
 
 const FILE_STORE_ABI = [
@@ -32,11 +32,13 @@ const FILE_STORE_ABI = [
 ];
 
 async function main() {
-  const privateKey = process.env.PRIVATE_KEY;
-  const rpcUrl     = process.env.ETH_RPC_URL;
+  const privateKey  = process.env.PRIVATE_KEY;
+  const infuraKey   = process.env.INFURA_API_KEY;
+  const rpcUrl      = process.env.ETH_RPC_URL
+                   || (infuraKey && `https://sepolia.infura.io/v3/${infuraKey}`);
 
   if (!privateKey) throw new Error('PRIVATE_KEY env var required');
-  if (!rpcUrl)     throw new Error('ETH_RPC_URL env var required');
+  if (!rpcUrl)     throw new Error('ETH_RPC_URL or INFURA_API_KEY env var required');
 
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   const signer   = new ethers.Wallet(privateKey.startsWith('0x') ? privateKey : '0x' + privateKey, provider);
@@ -56,7 +58,7 @@ async function main() {
   }
 
   // Read HTML
-  const htmlPath = join(__dirname, '..', 'viewer', 'frameworks_v4_viewer_v13.min.html');
+  const htmlPath = join(__dirname, '..', 'viewer', 'frameworks_v4_viewer_v16.html');
   let contents;
   try {
     contents = readFileSync(htmlPath, 'utf8');

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Frameworks V4</title>
+<title>Frameworks V4 — Step 4: Command String Replay (V3 Parity)</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #12141a; overflow: hidden; font-family: 'SF Mono', 'Fira Code', monospace; }
@@ -844,6 +844,29 @@ class FrameStore {
         };
     }
 
+    getSelectionBoundingBox() {
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        let minZ = Infinity, maxZ = -Infinity;
+        let found = false;
+        for (let i = 0; i < this.count; i++) {
+            if (!(this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED)) continue;
+            const o = this._o(i);
+            const hs = this.f32[o + F.SCALE] / 2;
+            const x = this.f32[o], y = this.f32[o+1], z = this.f32[o+2];
+            if (x - hs < minX) minX = x - hs;
+            if (x + hs > maxX) maxX = x + hs;
+            if (y - hs < minY) minY = y - hs;
+            if (y + hs > maxY) maxY = y + hs;
+            if (z - hs < minZ) minZ = z - hs;
+            if (z + hs > maxZ) maxZ = z + hs;
+            found = true;
+        }
+        if (!found) return null;
+        return { minX, maxX, minY, maxY, minZ, maxZ,
+            centerX: (minX+maxX)/2, centerY: (minY+maxY)/2, centerZ: (minZ+maxZ)/2 };
+    }
+
     setCalledSelected(text) {
         for (let i = 0; i < this.count; i++) {
             if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) {
@@ -946,7 +969,6 @@ class PaletteManager {
 
     reset() {
         this.currentIndex = 0;
-        // Restore full 80-color palette
         this.colors = Array.from({ length: 80 }, (_, i) => {
             const hex = [
                 'E84AA9','F2399D','DB2F96','E73E85','FF7F8E','FA5B67','E8424E','D5332F',
@@ -987,7 +1009,6 @@ class PaletteManager {
         let j = 0;
         for (let i = 0; i < oldSize; i++) {
             if (i >= start && i <= end) {
-                // deleted: map to nearest surviving color below, or 0
                 remap[i] = Math.max(0, start - 1);
             } else {
                 remap[i] = j++;
@@ -1085,7 +1106,6 @@ class PaletteEditContext {
         this.selection = null;
     }
 
-    // Select a range of palette indices [start, end] inclusive
     selectRange(start, end) {
         const s = this.size;
         start = Math.max(0, Math.min(s - 1, start));
@@ -1506,6 +1526,7 @@ class CommandExecutor {
         this.mode = 'normal';
         this.gridSize = 1.0;
         this.cornerIndex = 0;
+        this.structureCornerIndex = 0;
         this.lastCommand = '';
         this.commandHistory = [];
         this.lastCompoundCommand = '';
@@ -1613,6 +1634,7 @@ class CommandExecutor {
     executeCommandString(cmdString) {
         const expanded = this.expandRepeats(cmdString);
         this.cornerIndex = 0;
+        this.structureCornerIndex = 0;
         console.log(`Executing command string (${expanded.length} commands):`, expanded);
 
         // Replay mode: run through the state machine headlessly.
@@ -1655,9 +1677,8 @@ class CommandExecutor {
                 this.paletteEditContext.enter();
                 while (i < expanded.length && expanded[i] !== ')') {
                     const pk = expanded[i];
-                    // #[n] or #[n:m] range select
                     if (pk === '#' && expanded[i + 1] === '[') {
-                        i += 2; // skip # and [
+                        i += 2;
                         let rangeText = '';
                         while (i < expanded.length && expanded[i] !== ']') {
                             rangeText += expanded[i];
@@ -1883,7 +1904,6 @@ class CommandExecutor {
                 this.colorContext.enter();
                 this.commandTree.addCommand(key);
                 break;
-
             case 'P':
                 this.paletteEditContext.enter();
                 this.commandTree.addCommand('P(');
@@ -1896,6 +1916,11 @@ class CommandExecutor {
 
             case 'q':
                 this.cycleCorner();
+                this.commandTree.addCommand(key);
+                break;
+
+            case 'Q':
+                this.cycleCornerStructure();
                 this.commandTree.addCommand(key);
                 break;
 
@@ -2101,6 +2126,7 @@ class CommandExecutor {
 
     executeKeyNormal(key) {
         if (key !== 'q') this.cornerIndex = 0;
+        if (key !== 'Q') this.structureCornerIndex = 0;
         if (this.mode === 'translate') {
             if (['i', 'j', 'k', 'l'].includes(key)) {
                 return this.handleTranslate(key);
@@ -2145,6 +2171,7 @@ class CommandExecutor {
             case 'h': this.store.hideSelected(); break;
             case 'H': this.store.showAll(); break;
             case 'q': this.cycleCorner(); break;
+            case 'Q': this.cycleCornerStructure(); break;
             case 'w': /* handled by replay loop inline */ break;
             case 'W': /* handled by replay loop inline */ break;
             case 'a': this.selectAllOfColor(); break;
@@ -2160,6 +2187,9 @@ class CommandExecutor {
                 break;
             case 'p':
                 this.colorContext.enter();
+                break;
+            case 'P':
+                this.paletteEditContext.enter();
                 break;
             case 'v':
                 this.cameraContext.enter();
@@ -2392,8 +2422,7 @@ class CommandExecutor {
         this.store.centerStructureToCursor(this.cursor.x, this.cursor.y, this.cursor.z);
     }
 
-    getCornerCoordinates(cornerIndex) {
-        const bbox = this.store.getBoundingBox();
+    getCornerCoordinates(cornerIndex, bbox) {
         const view = this.currentView;
         const corners = [];
 
@@ -2470,14 +2499,23 @@ class CommandExecutor {
     }
 
     cycleCorner() {
-        if (this.store.count === 0) return;
-
-        const corner = this.getCornerCoordinates(this.cornerIndex);
+        const bbox = this.store.getSelectionBoundingBox();
+        if (!bbox) return;
+        const corner = this.getCornerCoordinates(this.cornerIndex, bbox);
         this.cursor.x = corner.x;
         this.cursor.y = corner.y;
         this.cursor.z = corner.z;
-
         this.cornerIndex = (this.cornerIndex + 1) % 8;
+    }
+
+    cycleCornerStructure() {
+        if (this.store.count === 0) return;
+        const bbox = this.store.getBoundingBox();
+        const corner = this.getCornerCoordinates(this.structureCornerIndex, bbox);
+        this.cursor.x = corner.x;
+        this.cursor.y = corner.y;
+        this.cursor.z = corner.z;
+        this.structureCornerIndex = (this.structureCornerIndex + 1) % 8;
     }
 
     openWriteOverlay(key) {
@@ -2532,21 +2570,19 @@ class CommandExecutor {
     }
 
     resetAll() {
-        // Reset executor state
         this.cursor.x = 0; this.cursor.y = 0; this.cursor.z = 0;
         this.mode = 'normal';
         this.cornerIndex = 0;
+        this.structureCornerIndex = 0;
         this.animationActive = false;
         this.animGlobalPhase = 0.0;
         this.lineHW  = 0.018;
         this.lineExt = 0.125;
         if (this.gpuLineUpdate) this.gpuLineUpdate(this.lineHW, this.lineExt);
-        // Exit any active contexts
         if (this.colorContext.active)       this.colorContext.exit();
         if (this.cameraContext.active)      this.cameraContext.exit();
         if (this.selectionContext.active)   this.selectionContext.exit();
         if (this.paletteEditContext.active) this.paletteEditContext.exit();
-        // Reset camera to default
         const cam = this.camera;
         cam.theta = Math.PI / 4; cam.phi = Math.PI / 6; cam.dist = 30;
         cam.target = [0, 0, 0];
@@ -2562,7 +2598,6 @@ class CommandExecutor {
         }
     }
 
-    // Parse "n" or "n:m" and apply to paletteEditContext
     _paletteApplyRange(rangeText) {
         const parts = rangeText.split(':').map(s => parseInt(s.trim()));
         const start = parts[0];
@@ -2573,8 +2608,6 @@ class CommandExecutor {
     handlePaletteEditContextNavigation(key) {
         const ctx = this.paletteEditContext;
         if (key === '#') {
-            // open bracket input for range — handled inline during replay,
-            // handled interactively via bracket overlay
             this._paletteOpenBracketInput();
             this.commandTree.addCommand(key);
             return;
@@ -2974,10 +3007,8 @@ async function main() {
   const instanceBuf = device.createBuffer({ size: maxBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   const visibleBuf = device.createBuffer({ size: MAX_INSTANCES * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   const indirectBuf = device.createBuffer({ size: 20, usage: GPUBufferUsage.INDIRECT | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
-  const palette = new PaletteManager();
   const MAX_PALETTE_COLORS = 80;
   const paletteBuf = device.createBuffer({ size: MAX_PALETTE_COLORS * 4 * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-  device.queue.writeBuffer(paletteBuf, 0, palette.toFloat32Array());
 
   const uniformBuf = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const cullUniformBuf = device.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -3059,6 +3090,8 @@ async function main() {
 
   // App state
   const store = new FrameStore();
+  const palette = new PaletteManager();
+  device.queue.writeBuffer(paletteBuf, 0, palette.toFloat32Array());
   const cam = new Camera(canvas);
   const executor = new CommandExecutor(store, palette, cam);
   executor.onNameWritten = () => { showLabels = true; };
@@ -3066,10 +3099,10 @@ async function main() {
     const geo = buildFrameGeo(hw, ext);
     device.queue.writeBuffer(frameVB, 0, geo.verts);
   };
+
   executor.paletteEditContext.onPaletteChanged = () => {
     const data = palette.toFloat32Array();
     device.queue.writeBuffer(paletteBuf, 0, data);
-    buildPaletteGrid(palette);
   };
 
   // Auto-execute: when loaded as an on-chain token the renderer injects
@@ -3078,31 +3111,13 @@ async function main() {
   // Stores the condensed command string for minting.
   // Set to the literal bar input when executed via the command bar,
   // or re-condensed from keystrokes when built interactively.
-  let mintCommandString = '';
   if (typeof autoExecuteCommand !== 'undefined' && autoExecuteCommand) {
     executor.executeCommandString(autoExecuteCommand);
     store.deselectAll();
-    mintCommandString = autoExecuteCommand;
     showUI = false;
     document.getElementById('command-bar').style.display = 'none';
   }
 
-  // Build palette grid
-  function buildPaletteGrid(pal) {
-    const paletteGrid = document.getElementById('palette-grid');
-    paletteGrid.innerHTML = '';
-    const data = pal.toFloat32Array();
-    for (let i = 0; i < pal.size; i++) {
-      const cell = document.createElement('div');
-      cell.className = 'palette-cell';
-      const r = (data[i*4] * 255)|0;
-      const g = (data[i*4+1] * 255)|0;
-      const b = (data[i*4+2] * 255)|0;
-      cell.style.background = `rgb(${r},${g},${b})`;
-      paletteGrid.appendChild(cell);
-    }
-  }
-  buildPaletteGrid(palette);
 
   // Command bar controls
   const commandInput = document.getElementById('command-input');
@@ -3116,9 +3131,7 @@ async function main() {
       store.clear();
       palette.reset();
       device.queue.writeBuffer(paletteBuf, 0, palette.toFloat32Array());
-      buildPaletteGrid(palette);
       executor.resetAll();
-      mintCommandString = cmd;
       executor.executeCommandString(cmd);
     }
   });
@@ -3152,7 +3165,6 @@ async function main() {
       overlay.classList.remove('active');
       if (cmd) {
         executor.executeCommandString(cmd);
-        // Append to command bar input
         const existing = commandInput.value.trim();
         commandInput.value = existing ? existing + ' ' + cmd : cmd;
         mintCommandString = commandInput.value;
@@ -3170,11 +3182,9 @@ async function main() {
         store.clear();
         palette.reset();
         device.queue.writeBuffer(paletteBuf, 0, palette.toFloat32Array());
-        buildPaletteGrid(palette);
         executor.resetAll();
-        mintCommandString = cmd;
         executor.executeCommandString(cmd);
-        }
+      }
       commandInput.blur();
     } else if (e.key === 'Escape') {
       commandInput.blur();
@@ -3333,6 +3343,7 @@ async function main() {
       cp.end();
     }
 
+
     const tv = ctx.getCurrentTexture().createView();
     const rp = enc.beginRenderPass({
       colorAttachments: [{
@@ -3343,7 +3354,6 @@ async function main() {
       }],
       depthStencilAttachment: { view: depthTex.createView(), depthClearValue: 1, depthLoadOp:'clear', depthStoreOp:'discard' },
     });
-
     if (n > 0) {
       rp.setPipeline(framePipeline);
       rp.setBindGroup(0, renderBG);
@@ -3351,7 +3361,6 @@ async function main() {
       rp.setIndexBuffer(frameIB, 'uint16');
       rp.drawIndexedIndirect(indirectBuf, 0);
     }
-
     if (showUI) {
       rp.setPipeline(cursorPipeline);
       rp.setBindGroup(0, renderBG);
@@ -3359,8 +3368,8 @@ async function main() {
       rp.setIndexBuffer(curIB, 'uint16');
       rp.drawIndexed(curIdxCount, 1);
     }
-
     rp.end();
+
 
     if (!pendingReadback && fpsFrames % 30 === 0 && n > 0) {
       enc.copyBufferToBuffer(indirectBuf, 0, readbackBuf, 0, 20);
@@ -3368,6 +3377,7 @@ async function main() {
     }
 
     device.queue.submit([enc.finish()]);
+
 
     if (pendingReadback && !mapInFlight) {
       mapInFlight = true;
@@ -3434,6 +3444,7 @@ async function main() {
 
   requestAnimationFrame(frame);
 
+  // ============================================================
 }
 
 main().catch(e => {

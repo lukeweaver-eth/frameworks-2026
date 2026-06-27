@@ -107,6 +107,9 @@ In `frameworks-v4-mint.html`, update the Collection Config defaults:
 | v15 | `frameworks_v4_viewer_v11.html` | `0xFd2003545B0c25aFE4E92DB866BEd105F75F3AEe` | 15 (not registered) | Missing IIFE — double-declaration error in proxy |
 | v16 | `frameworks_v4_viewer_v12.html` | `0x67A5395945Dd99c88c2F3F978056aF354b0E7511` | 16 (pending registration) | Fix palette TDZ + IIFE wrap; raw unminified upload |
 | v17 | `frameworks_v4_viewer_v13.html` | `0xb8eB33fBfFec6641334Ae69c169167CFeaAdc4fB` | 17 (pending registration) | Minified 122KB→67KB (4 chunks); compress join_vars:false + mangle keep_classnames:true |
+| v18 | `frameworks_v4_viewer_v14.html` | `0x4276Af782304286eD7A769CFa97EA5433F722917` | 18 (pending registration) | Same source as v16/v17 — confirmed IIFE + palette order fix; 68.2KB minified |
+| v19 | `frameworks_v4_viewer_v15.html` | `0x5181C06Ac2e75eF196D3a8F52C1c42A77a675bb0` | 19 (pending registration) | Derived from mint via derive-viewer.py — fixes viewer/mint divergence; 68.0KB minified |
+| v20 | `frameworks_v4_viewer_v16.html` | `0x20CBaD40EcE732870db8D811B524c6dA0eFA9c16` | 20 (pending registration) | Same as v19 source but uploaded raw/unminified (123KB, 7 chunks) — avoids terser TDZ on CommandExecutor |
 
 Collection: `0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40` (Sepolia)
 EthFS FileStore: `0xFe1411d6864592549AdE050215482e4385dFa0FB` (all networks)

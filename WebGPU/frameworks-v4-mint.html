@@ -171,6 +171,25 @@ canvas { display: block; width: 100vw; height: 100vh; }
 }
 #mint-config summary { color: #888; font-size: 11px; cursor: pointer; }
 #mint-config summary:hover { color: #bbb; }
+#img-compress {
+  border-top: 1px solid #333; margin-top: 14px; padding-top: 10px;
+}
+#img-compress summary { color: #888; font-size: 11px; cursor: pointer; }
+#img-compress summary:hover { color: #bbb; }
+#img-compress .compress-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 8px; gap: 8px;
+}
+#img-compress label { color: #888; font-size: 10px; flex-shrink: 0; }
+#img-compress select, #img-compress input[type=range] { flex: 1; }
+#img-compress select {
+  background: #1a1a1e; color: #ddd; border: 1px solid #444;
+  padding: 3px 6px; font-family: inherit; font-size: 11px;
+}
+#img-compress .compress-stat {
+  margin-top: 8px; font-size: 10px; color: #8888aa;
+  display: flex; justify-content: space-between;
+}
 </style>
 </head>
 <body>
@@ -202,8 +221,35 @@ canvas { display: block; width: 100vw; height: 100vh; }
   <label>Preview Image</label>
   <div class="mint-row">
     <button id="btn-capture" class="mint-btn">Capture Preview</button>
+    <button id="btn-load-png" class="mint-btn">Load PNG</button>
+    <button id="btn-download-preview" class="mint-btn" disabled>Save PNG</button>
   </div>
+  <input type="file" id="png-file-input" accept="image/png,image/jpeg,image/webp" style="display:none">
   <img id="mint-preview-img" alt="preview">
+
+  <details id="img-compress">
+    <summary>Image Compression</summary>
+    <div class="compress-row">
+      <label>format</label>
+      <select id="compress-fmt">
+        <option value="image/png">PNG (lossless)</option>
+        <option value="image/jpeg">JPEG</option>
+        <option value="image/webp">WebP</option>
+      </select>
+    </div>
+    <div class="compress-row">
+      <label>size <span id="compress-size-val">256</span>px</label>
+      <input type="range" id="compress-size" min="64" max="1024" step="64" value="256">
+    </div>
+    <div class="compress-row" id="compress-quality-row">
+      <label>quality <span id="compress-quality-val">0.85</span></label>
+      <input type="range" id="compress-quality" min="0.05" max="1.0" step="0.05" value="0.85">
+    </div>
+    <div class="compress-stat">
+      <span id="compress-artifact-kb">artifact —</span>
+      <span id="compress-fullres-kb">full-res —</span>
+    </div>
+  </details>
 
   <div class="mint-row" style="margin-top:14px">
     <button id="btn-mint" class="mint-btn primary" disabled>Mint Token</button>
@@ -216,7 +262,7 @@ canvas { display: block; width: 100vw; height: 100vh; }
     <label>Collection Address</label>
     <input type="text" id="mint-collection" placeholder="0x..." value="0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40">
     <label>Renderer Index</label>
-    <input type="text" id="mint-renderer-idx" placeholder="0" value="17">
+    <input type="text" id="mint-renderer-idx" placeholder="0" value="20">
     <label>Chain ID</label>
     <input type="text" id="mint-chain-id" placeholder="1" value="11155111">
   </details>
@@ -929,6 +975,29 @@ class FrameStore {
         };
     }
 
+    getSelectionBoundingBox() {
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        let minZ = Infinity, maxZ = -Infinity;
+        let found = false;
+        for (let i = 0; i < this.count; i++) {
+            if (!(this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED)) continue;
+            const o = this._o(i);
+            const hs = this.f32[o + F.SCALE] / 2;
+            const x = this.f32[o], y = this.f32[o+1], z = this.f32[o+2];
+            if (x - hs < minX) minX = x - hs;
+            if (x + hs > maxX) maxX = x + hs;
+            if (y - hs < minY) minY = y - hs;
+            if (y + hs > maxY) maxY = y + hs;
+            if (z - hs < minZ) minZ = z - hs;
+            if (z + hs > maxZ) maxZ = z + hs;
+            found = true;
+        }
+        if (!found) return null;
+        return { minX, maxX, minY, maxY, minZ, maxZ,
+            centerX: (minX+maxX)/2, centerY: (minY+maxY)/2, centerZ: (minZ+maxZ)/2 };
+    }
+
     setCalledSelected(text) {
         for (let i = 0; i < this.count; i++) {
             if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) {
@@ -1588,6 +1657,7 @@ class CommandExecutor {
         this.mode = 'normal';
         this.gridSize = 1.0;
         this.cornerIndex = 0;
+        this.structureCornerIndex = 0;
         this.lastCommand = '';
         this.commandHistory = [];
         this.lastCompoundCommand = '';
@@ -1695,6 +1765,7 @@ class CommandExecutor {
     executeCommandString(cmdString) {
         const expanded = this.expandRepeats(cmdString);
         this.cornerIndex = 0;
+        this.structureCornerIndex = 0;
         console.log(`Executing command string (${expanded.length} commands):`, expanded);
 
         // Replay mode: run through the state machine headlessly.
@@ -1979,6 +2050,11 @@ class CommandExecutor {
                 this.commandTree.addCommand(key);
                 break;
 
+            case 'Q':
+                this.cycleCornerStructure();
+                this.commandTree.addCommand(key);
+                break;
+
             case 'v':
                 this.cameraContext.enter();
                 this.commandTree.addCommand(key);
@@ -2181,6 +2257,7 @@ class CommandExecutor {
 
     executeKeyNormal(key) {
         if (key !== 'q') this.cornerIndex = 0;
+        if (key !== 'Q') this.structureCornerIndex = 0;
         if (this.mode === 'translate') {
             if (['i', 'j', 'k', 'l'].includes(key)) {
                 return this.handleTranslate(key);
@@ -2225,6 +2302,7 @@ class CommandExecutor {
             case 'h': this.store.hideSelected(); break;
             case 'H': this.store.showAll(); break;
             case 'q': this.cycleCorner(); break;
+            case 'Q': this.cycleCornerStructure(); break;
             case 'w': /* handled by replay loop inline */ break;
             case 'W': /* handled by replay loop inline */ break;
             case 'a': this.selectAllOfColor(); break;
@@ -2475,8 +2553,7 @@ class CommandExecutor {
         this.store.centerStructureToCursor(this.cursor.x, this.cursor.y, this.cursor.z);
     }
 
-    getCornerCoordinates(cornerIndex) {
-        const bbox = this.store.getBoundingBox();
+    getCornerCoordinates(cornerIndex, bbox) {
         const view = this.currentView;
         const corners = [];
 
@@ -2553,14 +2630,23 @@ class CommandExecutor {
     }
 
     cycleCorner() {
-        if (this.store.count === 0) return;
-
-        const corner = this.getCornerCoordinates(this.cornerIndex);
+        const bbox = this.store.getSelectionBoundingBox();
+        if (!bbox) return;
+        const corner = this.getCornerCoordinates(this.cornerIndex, bbox);
         this.cursor.x = corner.x;
         this.cursor.y = corner.y;
         this.cursor.z = corner.z;
-
         this.cornerIndex = (this.cornerIndex + 1) % 8;
+    }
+
+    cycleCornerStructure() {
+        if (this.store.count === 0) return;
+        const bbox = this.store.getBoundingBox();
+        const corner = this.getCornerCoordinates(this.structureCornerIndex, bbox);
+        this.cursor.x = corner.x;
+        this.cursor.y = corner.y;
+        this.cursor.z = corner.z;
+        this.structureCornerIndex = (this.structureCornerIndex + 1) % 8;
     }
 
     openWriteOverlay(key) {
@@ -2618,6 +2704,7 @@ class CommandExecutor {
         this.cursor.x = 0; this.cursor.y = 0; this.cursor.z = 0;
         this.mode = 'normal';
         this.cornerIndex = 0;
+        this.structureCornerIndex = 0;
         this.animationActive = false;
         this.animGlobalPhase = 0.0;
         this.lineHW  = 0.018;
@@ -3117,7 +3204,7 @@ async function main() {
     compute: { module: cullShader, entryPoint: 'cull_main' },
   });
 
-  let depthTex, msaaTex;
+  let depthTex, msaaTex, captureTex, captureBuf, captureW, captureH;
   function resize() {
     const dpr = window.devicePixelRatio || 1;
     canvas.width = canvas.clientWidth * dpr;
@@ -3126,8 +3213,16 @@ async function main() {
     labelCanvas.height = canvas.height;
     if (depthTex) depthTex.destroy();
     if (msaaTex) msaaTex.destroy();
-    depthTex = device.createTexture({ size: [canvas.width, canvas.height], format: depthFormat, sampleCount: SAMPLE_COUNT, usage: GPUTextureUsage.RENDER_ATTACHMENT });
-    msaaTex = device.createTexture({ size: [canvas.width, canvas.height], format: fmt, sampleCount: SAMPLE_COUNT, usage: GPUTextureUsage.RENDER_ATTACHMENT });
+    if (captureTex) captureTex.destroy();
+    if (captureBuf) captureBuf.destroy();
+    captureW = canvas.width;
+    captureH = canvas.height;
+    depthTex = device.createTexture({ size: [captureW, captureH], format: depthFormat, sampleCount: SAMPLE_COUNT, usage: GPUTextureUsage.RENDER_ATTACHMENT });
+    msaaTex = device.createTexture({ size: [captureW, captureH], format: fmt, sampleCount: SAMPLE_COUNT, usage: GPUTextureUsage.RENDER_ATTACHMENT });
+    // Capture target — same format as swap chain so msaaTex can resolve into it
+    captureTex = device.createTexture({ size: [captureW, captureH], format: fmt, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
+    const bytesPerRow = Math.ceil(captureW * 4 / 256) * 256;
+    captureBuf = device.createBuffer({ size: bytesPerRow * captureH, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   }
   window.addEventListener('resize', resize);
   resize();
@@ -3196,6 +3291,8 @@ async function main() {
       device.queue.writeBuffer(paletteBuf, 0, palette.toFloat32Array());
       buildPaletteGrid(palette);
       executor.resetAll();
+      cam.theta = Math.PI/4; cam.phi = Math.PI/6; cam.dist = 30;
+      cam.target = [0, 0, 0]; cam.invalidate();
       mintCommandString = cmd;
       executor.executeCommandString(cmd);
       if (mintPanel.classList.contains('active')) updateMintCommand();
@@ -3250,6 +3347,8 @@ async function main() {
         device.queue.writeBuffer(paletteBuf, 0, palette.toFloat32Array());
         buildPaletteGrid(palette);
         executor.resetAll();
+        cam.theta = Math.PI/4; cam.phi = Math.PI/6; cam.dist = 30;
+        cam.target = [0, 0, 0]; cam.invalidate();
         mintCommandString = cmd;
         executor.executeCommandString(cmd);
         if (mintPanel.classList.contains('active')) updateMintCommand();
@@ -3348,6 +3447,72 @@ async function main() {
       showLabels = !showLabels;
       return;
     }
+    if (e.key === 'o') {
+      // PNG export — captured via GPU readback on next frame
+      // alt+o = full image, plain o = square crop (centered)
+      pendingCapture = e.altKey ? 'full' : 'square';
+      return;
+    }
+    if (e.key === 'O') {
+      // SVG export — project frame centerlines through VP matrix to screen coords
+      const w = canvas.width, h = canvas.height;
+      const vp = cam.vp; // column-major mat4
+      const ext = 0.125; // must match buildFrameGeo ext default
+      // 4 lines per frame: [lx1,ly1, lx2,ly2] in local space (z=0), scaled by inst.scale
+      const localLines = [
+        [-(0.5+ext),  0.5,    (0.5+ext),  0.5  ],  // top
+        [-(0.5+ext), -0.5,    (0.5+ext), -0.5  ],  // bottom
+        [ -0.5,     -(0.5+ext), -0.5,    (0.5+ext)],  // left
+        [  0.5,     -(0.5+ext),  0.5,    (0.5+ext)],  // right
+      ];
+      function projectPt(wx, wy, wz) {
+        const cx = vp[0]*wx + vp[4]*wy + vp[8]*wz  + vp[12];
+        const cy = vp[1]*wx + vp[5]*wy + vp[9]*wz  + vp[13];
+        const cw = vp[3]*wx + vp[7]*wy + vp[11]*wz + vp[15];
+        if (cw <= 0) return null;
+        return [( cx/cw * 0.5 + 0.5) * w,
+                (-cy/cw * 0.5 + 0.5) * h];
+      }
+      const lines = [];
+      for (let i = 0; i < store.count; i++) {
+        if (!(store.u32[store._o(i) + U.FLAGS] & FLAG_VISIBLE)) continue;
+        const o = store._o(i);
+        const px = store.f32[o+F.PX], py = store.f32[o+F.PY], pz = store.f32[o+F.PZ];
+        const sc = store.f32[o+F.SCALE];
+        const rx = store.f32[o+F.RX], ry = store.f32[o+F.RY], rz = store.f32[o+F.RZ];
+        const ux = store.f32[o+F.UX], uy = store.f32[o+F.UY], uz = store.f32[o+F.UZ];
+        const ci = store.u32[o + U.COLOR_INDEX];
+        const [r, g, b] = palette.colors[ci % palette.size];
+        const col = `rgb(${(r*255)|0},${(g*255)|0},${(b*255)|0})`;
+        for (const [lx1,ly1,lx2,ly2] of localLines) {
+          const wx1 = rx*lx1*sc + ux*ly1*sc + px;
+          const wy1 = ry*lx1*sc + uy*ly1*sc + py;
+          const wz1 = rz*lx1*sc + uz*ly1*sc + pz;
+          const wx2 = rx*lx2*sc + ux*ly2*sc + px;
+          const wy2 = ry*lx2*sc + uy*ly2*sc + py;
+          const wz2 = rz*lx2*sc + uz*ly2*sc + pz;
+          const s1 = projectPt(wx1, wy1, wz1);
+          const s2 = projectPt(wx2, wy2, wz2);
+          if (s1 && s2) lines.push({ s1, s2, col });
+        }
+      }
+      const dpr = window.devicePixelRatio || 1;
+      const vw = (w / dpr)|0, vh = (h / dpr)|0;
+      const bgR = (0.071*255)|0, bgG = (0.078*255)|0, bgB = (0.102*255)|0;
+      let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${vw}" height="${vh}" viewBox="0 0 ${w} ${h}">\n`;
+      svg += `<rect width="${w}" height="${h}" fill="rgb(${bgR},${bgG},${bgB})"/>\n`;
+      for (const { s1, s2, col } of lines) {
+        svg += `<line x1="${s1[0].toFixed(1)}" y1="${s1[1].toFixed(1)}" x2="${s2[0].toFixed(1)}" y2="${s2[1].toFixed(1)}" stroke="${col}" stroke-width="1.5" stroke-linecap="square"/>\n`;
+      }
+      svg += '</svg>';
+      const blob = new Blob([svg], { type: 'image/svg+xml' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'frameworks.svg';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      return;
+    }
     executor.executeKey(e.key, e.shiftKey);
   });
 
@@ -3355,6 +3520,8 @@ async function main() {
   let visibleCount = 0;
   let pendingReadback = false;
   let mapInFlight = false;
+  let pendingCapture = false;
+  let captureInFlight = false;
   let fpsFrames = 0, fpsLast = performance.now(), fps = 0;
 
   const indirectReset = new Uint32Array([frameIdxCount, 0, 0, 0, 0]);
@@ -3414,34 +3581,50 @@ async function main() {
       cp.end();
     }
 
+    function doRenderPass(resolveTarget) {
+      const rp = enc.beginRenderPass({
+        colorAttachments: [{
+          view: msaaTex.createView(),
+          resolveTarget,
+          clearValue: { r:0.071, g:0.078, b:0.102, a:1 },
+          loadOp:'clear', storeOp:'discard',
+        }],
+        depthStencilAttachment: { view: depthTex.createView(), depthClearValue: 1, depthLoadOp:'clear', depthStoreOp:'discard' },
+      });
+      if (n > 0) {
+        rp.setPipeline(framePipeline);
+        rp.setBindGroup(0, renderBG);
+        rp.setVertexBuffer(0, frameVB);
+        rp.setIndexBuffer(frameIB, 'uint16');
+        rp.drawIndexedIndirect(indirectBuf, 0);
+      }
+      if (showUI) {
+        rp.setPipeline(cursorPipeline);
+        rp.setBindGroup(0, renderBG);
+        rp.setVertexBuffer(0, curVB);
+        rp.setIndexBuffer(curIB, 'uint16');
+        rp.drawIndexed(curIdxCount, 1);
+      }
+      rp.end();
+    }
+
     const tv = ctx.getCurrentTexture().createView();
-    const rp = enc.beginRenderPass({
-      colorAttachments: [{
-        view: msaaTex.createView(),
-        resolveTarget: tv,
-        clearValue: { r:0.071, g:0.078, b:0.102, a:1 },
-        loadOp:'clear', storeOp:'discard',
-      }],
-      depthStencilAttachment: { view: depthTex.createView(), depthClearValue: 1, depthLoadOp:'clear', depthStoreOp:'discard' },
-    });
 
-    if (n > 0) {
-      rp.setPipeline(framePipeline);
-      rp.setBindGroup(0, renderBG);
-      rp.setVertexBuffer(0, frameVB);
-      rp.setIndexBuffer(frameIB, 'uint16');
-      rp.drawIndexedIndirect(indirectBuf, 0);
+    if (pendingCapture && !captureInFlight) {
+      // Render into captureTex (for readback), then again into swap chain
+      doRenderPass(captureTex.createView());
+      const bytesPerRow = Math.ceil(captureW * 4 / 256) * 256;
+      enc.copyTextureToBuffer(
+        { texture: captureTex },
+        { buffer: captureBuf, bytesPerRow, rowsPerImage: captureH },
+        [captureW, captureH]
+      );
+      doRenderPass(tv);
+      captureInFlight = pendingCapture; // 'full' or 'square'
+      pendingCapture = false;
+    } else {
+      doRenderPass(tv);
     }
-
-    if (showUI) {
-      rp.setPipeline(cursorPipeline);
-      rp.setBindGroup(0, renderBG);
-      rp.setVertexBuffer(0, curVB);
-      rp.setIndexBuffer(curIB, 'uint16');
-      rp.drawIndexed(curIdxCount, 1);
-    }
-
-    rp.end();
 
     if (!pendingReadback && fpsFrames % 30 === 0 && n > 0) {
       enc.copyBufferToBuffer(indirectBuf, 0, readbackBuf, 0, 20);
@@ -3449,6 +3632,53 @@ async function main() {
     }
 
     device.queue.submit([enc.finish()]);
+
+    if (captureInFlight) {
+      const captureMode = captureInFlight;
+      captureInFlight = false;
+      const bytesPerRow = Math.ceil(captureW * 4 / 256) * 256;
+      const isBGRA = fmt === 'bgra8unorm';
+      captureBuf.mapAsync(GPUMapMode.READ).then(() => {
+        const raw = new Uint8Array(captureBuf.getMappedRange());
+        const imgData = new ImageData(captureW, captureH);
+        for (let row = 0; row < captureH; row++) {
+          const src = row * bytesPerRow;
+          const dst = row * captureW * 4;
+          for (let x = 0; x < captureW; x++) {
+            const s = src + x * 4, d = dst + x * 4;
+            imgData.data[d+0] = isBGRA ? raw[s+2] : raw[s+0];
+            imgData.data[d+1] = raw[s+1];
+            imgData.data[d+2] = isBGRA ? raw[s+0] : raw[s+2];
+            imgData.data[d+3] = 255;
+          }
+        }
+        captureBuf.unmap();
+        const full = document.createElement('canvas');
+        full.width = captureW;
+        full.height = captureH;
+        full.getContext('2d').putImageData(imgData, 0, 0);
+        const outCanvas = document.createElement('canvas');
+        if (captureMode === 'square') {
+          const side = Math.min(captureW, captureH);
+          const sx = ((captureW - side) / 2)|0;
+          const sy = ((captureH - side) / 2)|0;
+          outCanvas.width = side;
+          outCanvas.height = side;
+          outCanvas.getContext('2d').drawImage(full, sx, sy, side, side, 0, 0, side, side);
+        } else {
+          outCanvas.width = captureW;
+          outCanvas.height = captureH;
+          outCanvas.getContext('2d').drawImage(full, 0, 0);
+        }
+        outCanvas.toBlob(blob => {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'frameworks.png';
+          a.click();
+          URL.revokeObjectURL(a.href);
+        }, 'image/png');
+      });
+    }
 
     if (pendingReadback && !mapInFlight) {
       mapInFlight = true;
@@ -3589,7 +3819,9 @@ async function main() {
     } catch (err) { walletStatus.textContent = 'Error: ' + err.message; }
   });
 
-  // Preview capture — downsample to 512×512 JPEG to keep artifact small (~20-40KB)
+  let fullResImageURI = null;
+
+  // Preview capture — 256×256 PNG for artifact, full-res PNG for download
   btnCapture.addEventListener('click', async () => {
     mintStatusEl.innerHTML = '<span class="info">Capturing preview...</span>';
     const wasShowUI = showUI;
@@ -3597,29 +3829,129 @@ async function main() {
     store.deselectAll();
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
+      const src = canvas;
+
+      // Full-res: square crop from canvas at native resolution
+      const sq = Math.min(src.width, src.height);
+      const fullCv = document.createElement('canvas');
+      fullCv.width = fullCv.height = sq;
+      const fullCx = fullCv.getContext('2d');
+      fullCx.drawImage(src, (src.width - sq) / 2, (src.height - sq) / 2, sq, sq, 0, 0, sq, sq);
+      fullResImageURI = fullCv.toDataURL('image/png');
+
+      // Thumbnail: 256×256 for artifact
       const THUMB = 256;
       const offscreen = document.createElement('canvas');
       offscreen.width = THUMB; offscreen.height = THUMB;
       const ctx2d = offscreen.getContext('2d');
-      // Crop: scale so height fills the square, clip sides
-      const src = canvas;
-      const scale = THUMB / src.height;
-      const w = src.width * scale;
-      const ox = (THUMB - w) / 2;
-      ctx2d.drawImage(src, ox, 0, w, THUMB);
-      // Use WebP if supported, fall back to JPEG
-      const webpTest = document.createElement('canvas').toDataURL('image/webp');
-      const fmt = webpTest.startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg';
-      capturedImageURI = offscreen.toDataURL(fmt, 0.75);
+      ctx2d.drawImage(fullCv, 0, 0, sq, sq, 0, 0, THUMB, THUMB);
+      capturedImageURI = offscreen.toDataURL('image/png');
+
       mintPreviewImg.src = capturedImageURI;
       mintPreviewImg.style.display = 'block';
+      document.getElementById('btn-download-preview').disabled = false;
+      reencodePreview();
       const kb = Math.round(capturedImageURI.length * 0.75 / 1024);
-      mintStatusEl.innerHTML = '<span class="success">Preview captured (~' + kb + ' KB, ' + fmt.split('/')[1] + ').</span>';
+      const fullKb = Math.round(fullResImageURI.length * 0.75 / 1024);
+      mintStatusEl.innerHTML = '<span class="success">Captured: ' + kb + ' KB artifact · ' + fullKb + ' KB full-res (' + sq + 'px).</span>';
     } catch (err) {
       mintStatusEl.innerHTML = '<span class="error">Capture failed: ' + err.message + '</span>';
     }
     showUI = wasShowUI;
     validateMintReady();
+  });
+
+  // PNG loader
+  document.getElementById('btn-load-png').addEventListener('click', () => {
+    document.getElementById('png-file-input').click();
+  });
+
+  document.getElementById('png-file-input').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        // Square-crop centered, then encode at 256px for artifact
+        const side = Math.min(img.width, img.height);
+        const THUMB = 256;
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = THUMB;
+        cv.getContext('2d').drawImage(img,
+          (img.width - side) / 2, (img.height - side) / 2, side, side,
+          0, 0, THUMB, THUMB);
+        fullResImageURI = ev.target.result; // keep original as full-res
+        capturedImageURI = cv.toDataURL('image/png');
+        mintPreviewImg.src = capturedImageURI;
+        mintPreviewImg.style.display = 'block';
+        document.getElementById('btn-download-preview').disabled = false;
+        reencodePreview();
+        const kb = (capturedImageURI.length * 0.75 / 1024).toFixed(1);
+        mintStatusEl.innerHTML = '<span class="success">Image loaded (~' + kb + ' KB).</span>';
+        validateMintReady();
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  });
+
+  document.getElementById('btn-download-preview').addEventListener('click', () => {
+    const uri = fullResImageURI || capturedImageURI;
+    if (!uri) return;
+    const fmt = document.getElementById('compress-fmt').value;
+    const ext = fmt === 'image/png' ? 'png' : fmt === 'image/jpeg' ? 'jpg' : 'webp';
+    const a = document.createElement('a');
+    a.download = 'frameworks-preview.' + ext;
+    a.href = capturedImageURI; // always download the currently-encoded artifact version
+    a.click();
+  });
+
+  // Image compression panel
+  function reencodePreview() {
+    const src = fullResImageURI || capturedImageURI;
+    if (!src) return;
+    const fmt  = document.getElementById('compress-fmt').value;
+    const size = parseInt(document.getElementById('compress-size').value);
+    const qual = parseFloat(document.getElementById('compress-quality').value);
+
+    // Quality row only relevant for lossy formats
+    document.getElementById('compress-quality-row').style.opacity =
+      fmt === 'image/png' ? '0.3' : '1';
+
+    const img = new Image();
+    img.onload = () => {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = size;
+      const cx = cv.getContext('2d');
+      cx.drawImage(img, 0, 0, size, size);
+      capturedImageURI = cv.toDataURL(fmt, qual);
+      mintPreviewImg.src = capturedImageURI;
+
+      const artifactKb = (capturedImageURI.length * 0.75 / 1024).toFixed(1);
+      const fullKb = fullResImageURI
+        ? (fullResImageURI.length * 0.75 / 1024).toFixed(0) + ' KB full-res'
+        : '—';
+      const fmtLabel = fmt.split('/')[1];
+      document.getElementById('compress-artifact-kb').textContent =
+        artifactKb + ' KB artifact (' + size + 'px ' + fmtLabel + ')';
+      document.getElementById('compress-fullres-kb').textContent = fullKb;
+      validateMintReady();
+    };
+    img.src = fullResImageURI || capturedImageURI;
+  }
+
+  document.getElementById('compress-fmt').addEventListener('change', reencodePreview);
+  document.getElementById('compress-size').addEventListener('input', () => {
+    document.getElementById('compress-size-val').textContent =
+      document.getElementById('compress-size').value;
+    reencodePreview();
+  });
+  document.getElementById('compress-quality').addEventListener('input', () => {
+    document.getElementById('compress-quality-val').textContent =
+      parseFloat(document.getElementById('compress-quality').value).toFixed(2);
+    reencodePreview();
   });
 
   // Also update mint panel when Export is clicked
