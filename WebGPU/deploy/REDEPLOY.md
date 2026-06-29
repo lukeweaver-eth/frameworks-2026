@@ -110,7 +110,24 @@ In `frameworks-v4-mint.html`, update the Collection Config defaults:
 | v18 | `frameworks_v4_viewer_v14.html` | `0x4276Af782304286eD7A769CFa97EA5433F722917` | 18 (pending registration) | Same source as v16/v17 — confirmed IIFE + palette order fix; 68.2KB minified |
 | v19 | `frameworks_v4_viewer_v15.html` | `0x5181C06Ac2e75eF196D3a8F52C1c42A77a675bb0` | 19 (pending registration) | Derived from mint via derive-viewer.py — fixes viewer/mint divergence; 68.0KB minified |
 | v20 | `frameworks_v4_viewer_v16.html` | `0x20CBaD40EcE732870db8D811B524c6dA0eFA9c16` | 20 (pending registration) | Same as v19 source but uploaded raw/unminified (123KB, 7 chunks) — avoids terser TDZ on CommandExecutor |
+| v21 | `frameworks_v4_viewer_v17.html` | `0x1F2d0C672D8d579664c6ca14C66579029878F871` | 21 (pending registration) | Sketch log, commitments history, / command overlay with n-repeat, command compression |
+| v22 | `frameworks_v4_viewer_v18.min.html` | `0x56eC5A6f2df18b508bB913253B2d2f75bB45c6b4` | 22 (pending registration) | Minified (128KB→70KB, 4 chunks); same features as v21 |
+| v23 | `frameworks_v4_viewer_v18.min.html` | `0x09A68103D9a349E0ab9478823B7972a2Ea9C913a` | 23 (registered, tested ✓) | Same file, new deployer wallet (0xeE514bd) via Foundry keystore; Sepolia final test before mainnet |
+| mainnet v1 | `frameworks_4.0.min.html` | `0x3E34945ad431E4648e53e7AEBeC17b4cAbE452c8` | 5 (registered ✓) | Mainnet launch — collection 0xba1901b542aa58f181f7ae18ed6cd79fda779c62 |
 
 Collection: `0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40` (Sepolia)
+Collection: `0xba1901b542aa58f181f7ae18ed6cd79fda779c62` (Mainnet)
 EthFS FileStore: `0xFe1411d6864592549AdE050215482e4385dFa0FB` (all networks)
 ScriptyBuilderV2: `0xD7587F110E08F4D120A231bA97d3B577A81Df022` (all networks)
+
+---
+
+## Local-only features (not yet deployed onchain)
+
+The following features exist in `frameworks-v4-mint.html` but are NOT in the live onchain artifact (`frameworks_4.0.min.html`). They will be included in mainnet v2 (`frameworks_4.1.min.html`).
+
+- Sketch log + commitments history (two-row command bar)
+- `/` command overlay with n-repeat
+- Command compression (net axis cancellation, repeat notation)
+- Copy ↑ button (appends compressed sketch to commit field)
+- Planned: `~` loop notation and `.` step-pause notation for animated command playback

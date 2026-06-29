@@ -178,9 +178,13 @@ forge script script/DeployRenderer.s.sol --rpc-url $ETH_RPC_URL --private-key $P
 - Collection: `0xc3D5853bC409156C0AaC4E3d6F96d307C2E7Fb40`
 - EthFS FileStore: `0xFe1411d6864592549AdE050215482e4385dFa0FB`
 - ScriptyBuilderV2: `0xD7587F110E08F4D120A231bA97d3B577A81Df022`
-- Latest renderer (v20): `0x20CBaD40EcE732870db8D811B524c6dA0eFA9c16` at index 20 (pending owner wallet registration)
+- Latest renderer (v23): `0x09A68103D9a349E0ab9478823B7972a2Ea9C913a` at index 23 (registered, tested ✓)
+- **Mainnet renderer (v1)**: `0x3E34945ad431E4648e53e7AEBeC17b4cAbE452c8` at index 5, collection `0xba1901b542aa58f181f7ae18ed6cd79fda779c62`, EthFS file `frameworks_4.0.min.html`
 
-Next deploy: bump to `frameworks_v4_viewer_v17.html`, renderer index 21. EthFS filenames v4–v11 are burned (failed attempts).
+**IMPORTANT: The onchain EthFS version (mainnet v1 / `frameworks_4.0.min.html`) is now the live deployed artifact. Any changes to `frameworks-v4-mint.html` are local only and will NOT be reflected onchain until a new deploy cycle (Steps 0–6) is completed. Always note which features are local-only vs. deployed.**
+
+Next Sepolia deploy: bump to `frameworks_v4_viewer_v19.min.html`, renderer index 24. EthFS filenames v4–v11 are burned (failed attempts).
+Next mainnet deploy: bump to `frameworks_4.1.min.html`.
 
 See `deploy/REDEPLOY.md` for full deployment history and versioning steps.
 

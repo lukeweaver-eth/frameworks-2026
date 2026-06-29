@@ -10,34 +10,24 @@ canvas { display: block; width: 100vw; height: 100vh; }
 
 /* Command input bar */
 #command-bar {
-  position: fixed; top: 0; left: 0; right: 0;
+  position: fixed; top: 0; left: 0; right: 0; height: 40px;
   background: rgba(10,10,14,0.95); border-bottom: 1px solid #555;
-  display: flex; flex-direction: column; padding: 4px 12px; gap: 4px;
+  display: flex; align-items: center; padding: 0 12px; gap: 8px;
   pointer-events: all; z-index: 100;
-}
-#command-bar-row1, #command-bar-row2 {
-  display: flex; align-items: center; gap: 8px; height: 32px;
 }
 #command-input {
   flex: 1; background: #222; color: #ddd; border: 1px solid #555;
-  padding: 5px 10px; font-family: inherit; font-size: 12px;
-}
-#sketch-log {
-  flex: 1; background: #1a1a22; color: #888; border: 1px solid #444;
-  padding: 5px 10px; font-family: inherit; font-size: 12px;
+  padding: 6px 10px; font-family: inherit; font-size: 12px;
 }
 #command-bar button {
-  background: #333; color: #ccc; border: 1px solid #555; padding: 5px 10px;
-  font-family: inherit; font-size: 11px; cursor: pointer; white-space: nowrap;
+  background: #333; color: #ccc; border: 1px solid #555; padding: 6px 12px;
+  font-family: inherit; font-size: 11px; cursor: pointer;
 }
 #command-bar button:hover { background: #555; }
-#command-bar label { color: #999; font-size: 11px; white-space: nowrap; }
-#btn-hist-up, #btn-hist-down {
-  padding: 5px 7px; font-size: 10px;
-}
+#command-bar label { color: #999; font-size: 11px; }
 
 #hud {
-  position: fixed; top: 76px; left: 0; right: 0; bottom: 0;
+  position: fixed; top: 40px; left: 0; right: 0; bottom: 0;
   pointer-events: none; color: #8888aa; font-size: 11px; line-height: 1.6;
 }
 #hud.hidden * { display: none !important; }
@@ -139,20 +129,11 @@ canvas { display: block; width: 100vw; height: 100vh; }
 </head>
 <body>
 <div id="command-bar">
-  <div id="command-bar-row1">
-    <label>Commit:</label>
-    <input type="text" id="command-input" placeholder="Enter command string (e.g., f or fp5fpp2fppp or f(dR,8))">
-    <button id="btn-hist-up" title="Previous commitment">▲</button>
-    <button id="btn-hist-down" title="Next commitment">▼</button>
-    <button id="btn-execute">Execute</button>
-    <button id="btn-export">Export</button>
-    <button id="btn-copy-hash">Copy Hash URL</button>
-  </div>
-  <div id="command-bar-row2">
-    <label>Sketch:</label>
-    <input type="text" id="sketch-log" placeholder="(keystroke log)" readonly>
-    <button id="btn-copy-sketch" title="Copy sketch to commit field">Copy ↑</button>
-  </div>
+  <label>Command String:</label>
+  <input type="text" id="command-input" placeholder="Enter command string (e.g., f or fp5fpp2fppp or f(dR,8))">
+  <button id="btn-execute">Execute</button>
+  <button id="btn-export">Export</button>
+  <button id="btn-copy-hash">Copy Hash URL</button>
 </div>
 
 
@@ -1622,66 +1603,28 @@ class CommandExecutor {
         return result;
     }
 
-    // Compress a raw keystroke string into compact notation.
-    // Opposing pairs within axis groups cancel (iiikk -> i, iikk -> '').
-    // Runs of ≥2 identical chars use repeat notation: (x,n).
+    // V3 lines 2768-2800: condenseCommandString
     condenseCommandString(cmdString) {
         if (!cmdString || cmdString.length === 0) return '';
 
-        // Axis groups: keys whose net effect can be computed by cancellation.
-        // Each group maps pos-key and neg-key.
-        const AXIS = [
-            { pos: 'i', neg: 'k' },
-            { pos: 'j', neg: 'l' },
-            { pos: 'I', neg: 'K' },
-            { pos: 'J', neg: 'L' },
-        ];
-        const AXIS_KEY_SET = new Set(AXIS.flatMap(a => [a.pos, a.neg]));
-        // Map each key to its axis index
-        const keyToAxis = {};
-        AXIS.forEach((a, idx) => { keyToAxis[a.pos] = idx; keyToAxis[a.neg] = idx; });
-
-        // Split into runs: maximal consecutive sequences belonging to the same axis group,
-        // or individual non-axis characters.
-        const runs = [];
-        let i = 0;
-        while (i < cmdString.length) {
-            const ch = cmdString[i];
-            if (AXIS_KEY_SET.has(ch)) {
-                const axisIdx = keyToAxis[ch];
-                // Consume all chars in the same axis group
-                let j = i;
-                while (j < cmdString.length && AXIS_KEY_SET.has(cmdString[j]) && keyToAxis[cmdString[j]] === axisIdx) j++;
-                runs.push({ type: 'axis', axis: AXIS[axisIdx], chars: cmdString.slice(i, j) });
-                i = j;
-            } else {
-                runs.push({ type: 'char', ch });
-                i++;
-            }
-        }
-
-        // Encode a single token: repeat notation if n >= 2, else bare char.
-        function encode(ch, n) {
-            if (n === 0) return '';
-            if (n === 1) return ch;
-            return `(${ch},${n})`;
-        }
-
         let result = '';
-        for (const run of runs) {
-            if (run.type === 'char') {
-                result += run.ch;
-            } else {
-                const { pos, neg } = run.axis;
-                let posCount = 0, negCount = 0;
-                for (const ch of run.chars) {
-                    if (ch === pos) posCount++; else negCount++;
-                }
-                const net = posCount - negCount;
-                if (net > 0) result += encode(pos, net);
-                else if (net < 0) result += encode(neg, -net);
-                // net === 0: they cancel, emit nothing
+        let i = 0;
+
+        while (i < cmdString.length) {
+            const currentChar = cmdString[i];
+            let count = 1;
+
+            while (i + count < cmdString.length && cmdString[i + count] === currentChar) {
+                count++;
             }
+
+            if (count === 1) {
+                result += currentChar;
+            } else {
+                result += `(${currentChar},${count})`;
+            }
+
+            i += count;
         }
 
         return result;
@@ -3181,59 +3124,16 @@ async function main() {
   const btnExecute = document.getElementById('btn-execute');
   const btnExport = document.getElementById('btn-export');
   const btnCopyHash = document.getElementById('btn-copy-hash');
-  const sketchLogEl = document.getElementById('sketch-log');
-  const btnCopySketch = document.getElementById('btn-copy-sketch');
-  const btnHistUp = document.getElementById('btn-hist-up');
-  const btnHistDown = document.getElementById('btn-hist-down');
-
-  // Commitments history and sketch log state
-  const commitments = [];
-  let commitmentIdx = -1; // index into commitments for history browsing (-1 = tip)
-
-  function doExecute(cmd) {
-    store.clear();
-    palette.reset();
-    device.queue.writeBuffer(paletteBuf, 0, palette.toFloat32Array());
-    executor.resetAll();
-    cam.theta = Math.PI/4; cam.phi = Math.PI/6; cam.dist = 30;
-    cam.target = [0, 0, 0]; cam.invalidate();
-    executor.executeCommandString(cmd);
-    // Push to commitments if it's a new string at the tip
-    if (commitmentIdx === -1 || commitments[commitments.length - 1] !== cmd) {
-      commitments.push(cmd);
-    }
-    commitmentIdx = -1; // return to tip
-    sketchLogEl.value = ''; // reset sketch on new commitment
-  }
 
   btnExecute.addEventListener('click', () => {
     const cmd = commandInput.value.trim();
-    if (cmd) doExecute(cmd);
-  });
-
-  btnHistUp.addEventListener('click', () => {
-    if (commitments.length === 0) return;
-    if (commitmentIdx === -1) commitmentIdx = commitments.length - 1;
-    else commitmentIdx = Math.max(0, commitmentIdx - 1);
-    commandInput.value = commitments[commitmentIdx];
-  });
-
-  btnHistDown.addEventListener('click', () => {
-    if (commitmentIdx === -1) return;
-    commitmentIdx++;
-    if (commitmentIdx >= commitments.length) {
-      commitmentIdx = -1;
-      commandInput.value = '';
-    } else {
-      commandInput.value = commitments[commitmentIdx];
+    if (cmd) {
+      store.clear();
+      palette.reset();
+      device.queue.writeBuffer(paletteBuf, 0, palette.toFloat32Array());
+      executor.resetAll();
+      executor.executeCommandString(cmd);
     }
-  });
-
-  btnCopySketch.addEventListener('click', () => {
-    if (!sketchLogEl.value.trim()) return;
-    const compressed = executor.condenseCommandString(sketchLogEl.value.trim());
-    const existing = commandInput.value.trim();
-    commandInput.value = existing ? existing + compressed : compressed;
   });
 
   document.getElementById('bracket-input').addEventListener('keydown', e => {
@@ -3257,26 +3157,18 @@ async function main() {
     e.stopPropagation();
   });
 
-  // Track last slash command, repeat count, and where it starts in the sketch log
-  let lastSlashCmd = '';
-  let lastSlashRepeatCount = 1;
-  let lastSlashSketchStart = -1; // char index in sketchLogEl.value where the run begins
-
-  function runSlashCmd(cmd) {
-    executor.executeCommandString(cmd);
-    lastSlashSketchStart = sketchLogEl.value.length;
-    sketchLogEl.value += cmd;
-    lastSlashCmd = cmd;
-    lastSlashRepeatCount = 1;
-  }
-
   document.getElementById('slash-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') {
       e.preventDefault();
       const cmd = e.target.value.trim();
       const overlay = document.getElementById('slash-overlay');
       overlay.classList.remove('active');
-      if (cmd) runSlashCmd(cmd);
+      if (cmd) {
+        executor.executeCommandString(cmd);
+        const existing = commandInput.value.trim();
+        commandInput.value = existing ? existing + ' ' + cmd : cmd;
+        mintCommandString = commandInput.value;
+      }
     } else if (e.key === 'Escape') {
       e.preventDefault();
       document.getElementById('slash-overlay').classList.remove('active');
@@ -3286,7 +3178,13 @@ async function main() {
   commandInput.addEventListener('keydown', e => {
     if (e.key === 'Enter') {
       const cmd = commandInput.value.trim();
-      if (cmd) doExecute(cmd);
+      if (cmd) {
+        store.clear();
+        palette.reset();
+        device.queue.writeBuffer(paletteBuf, 0, palette.toFloat32Array());
+        executor.resetAll();
+        executor.executeCommandString(cmd);
+      }
       commandInput.blur();
     } else if (e.key === 'Escape') {
       commandInput.blur();
@@ -3379,27 +3277,7 @@ async function main() {
       showLabels = !showLabels;
       return;
     }
-    // 'n' key: repeat last slash command, accumulate in sketch log as (cmd,n)
-    if (e.key === 'n' && lastSlashCmd && lastSlashSketchStart !== -1) {
-      executor.executeCommandString(lastSlashCmd);
-      lastSlashRepeatCount++;
-      // Replace everything from lastSlashSketchStart onward with (cmd,n)
-      const prefix = sketchLogEl.value.slice(0, lastSlashSketchStart);
-      sketchLogEl.value = prefix + `(${lastSlashCmd},${lastSlashRepeatCount})`;
-      return;
-    }
-
     executor.executeKey(e.key, e.shiftKey);
-    // Append to sketch log for meaningful keys only
-    const SKETCH_KEYS = new Set([
-      'f','d','D','x','t','T','s','S','r','R','e','E','h','H',
-      'q','Q','a','A','C','z','Z',' ','m','p','P','v','#',
-      'i','j','k','l','I','J','K','L',
-      '0','1','2','3','4','5','6',
-    ]);
-    if (SKETCH_KEYS.has(e.key)) {
-      sketchLogEl.value += e.key;
-    }
   });
 
   // Render loop

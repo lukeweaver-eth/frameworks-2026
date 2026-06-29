@@ -1,18 +1,14 @@
 /**
- * upload-to-ethfs.mjs
+ * upload-to-ethfs-mainnet.mjs
  *
- * Uploads frameworks-v4-mint.html to EthFS using the SSTORE2 chunking pattern:
- * 1. Each chunk is deployed as a raw contract (one tx per chunk)
- * 2. createFileFromPointers() registers the file by name
+ * Uploads frameworks_4.0.min.html to EthFS on mainnet.
  *
  * Addresses:
- *   ContentStore (write): 0xFe1411d6864592549AdE050215482e4385dFa0FB
- *   FileStore    (read):  0x8FAA1AAb9DA8c75917C43Fb24fDdb513edDC3245
+ *   FileStore (same on all networks): 0xFe1411d6864592549AdE050215482e4385dFa0FB
  *
  * Usage:
- *   PRIVATE_KEY=0x... ETH_RPC_URL=https://... node script/upload-to-ethfs.mjs
- *
- * Bump FILE_NAME (and the matching string in FrameworksRendererV4.sol) on each upload.
+ *   node script/upload-to-ethfs-mainnet.mjs
+ *   (reads PRIVATE_KEY and ETH_RPC_URL from ../.env.enc)
  */
 
 import { readFileSync } from 'fs';
@@ -26,7 +22,7 @@ const require = createRequire(import.meta.url);
 require('@chainlink/env-enc').config({ path: join(__dirname, '..', '.env.enc') });
 
 const FILE_STORE_ADDRESS = '0xFe1411d6864592549AdE050215482e4385dFa0FB';
-const FILE_NAME = 'frameworks_v4_viewer_v18.min.html';
+const FILE_NAME = 'frameworks_4.0.min.html';
 const CHUNK_SIZE = 20000; // bytes — safely under 24KB SSTORE2 limit
 
 const FILE_STORE_ABI = [
@@ -36,21 +32,23 @@ const FILE_STORE_ABI = [
 
 async function main() {
   const privateKey  = process.env.PRIVATE_KEY;
-  const infuraKey   = process.env.INFURA_API_KEY;
-  const rpcUrl      = process.env.ETH_RPC_URL
-                   || (infuraKey && `https://sepolia.infura.io/v3/${infuraKey}`);
+  const rpcUrl      = process.env.ETH_RPC_URL;
 
   if (!privateKey) throw new Error('PRIVATE_KEY env var required');
-  if (!rpcUrl)     throw new Error('ETH_RPC_URL or INFURA_API_KEY env var required');
+  if (!rpcUrl)     throw new Error('ETH_RPC_URL env var required');
 
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   const signer   = new ethers.Wallet(privateKey.startsWith('0x') ? privateKey : '0x' + privateKey, provider);
+
+  const dryRun = process.argv.includes('--dry-run');
 
   const network = await provider.getNetwork();
   console.log(`Network: ${network.name} (chainId ${network.chainId})`);
   console.log(`Deployer: ${signer.address}`);
   const balance = await provider.getBalance(signer.address);
   console.log(`Balance: ${ethers.formatEther(balance)} ETH\n`);
+
+  if (network.chainId !== 1n) throw new Error(`Expected mainnet (chainId 1), got ${network.chainId}`);
 
   // Check if already exists
   const fileStore = new ethers.Contract(FILE_STORE_ADDRESS, FILE_STORE_ABI, signer);
@@ -73,38 +71,69 @@ async function main() {
   console.log(`Size: ${(contentBytes.length / 1024).toFixed(1)} KB`);
 
   const totalChunks = Math.ceil(contentBytes.length / CHUNK_SIZE);
-  console.log(`Chunks: ${totalChunks}\n`);
+  console.log(`Chunks: ${totalChunks}`);
 
-  // Step 1: Upload each chunk as an SSTORE2 contract
-  const pointers = [];
+  // Build initCode for each chunk
+  const initCodes = [];
   for (let i = 0; i < totalChunks; i++) {
     const start = i * CHUNK_SIZE;
     const end   = Math.min(start + CHUNK_SIZE, contentBytes.length);
     const chunk = contentBytes.slice(start, end);
-
-    // SSTORE2 init code: STOP opcode prefix + data, deployed via raw contract creation
     const dataWithPrefix = new Uint8Array(chunk.length + 1);
-    dataWithPrefix[0] = 0x00; // STOP opcode
+    dataWithPrefix[0] = 0x00;
     dataWithPrefix.set(chunk, 1);
-
     const len = dataWithPrefix.length;
     const lenHex = len.toString(16).padStart(4, '0');
-    const initCode = ethers.concat([
-      '0x61' + lenHex, // PUSH2 len
-      '0x80',          // DUP1
-      '0x600a',        // PUSH1 0x0a (10 byte offset)
-      '0x3d',          // RETURNDATASIZE (0)
-      '0x39',          // CODECOPY
-      '0x3d',          // RETURNDATASIZE (0)
-      '0xf3',          // RETURN
+    initCodes.push(ethers.concat([
+      '0x61' + lenHex, '0x80', '0x600a', '0x3d', '0x39', '0x3d', '0xf3',
       dataWithPrefix,
-    ]);
+    ]));
+  }
 
-    console.log(`Chunk ${i + 1}/${totalChunks} (${chunk.length} bytes)...`);
-    const tx = await signer.sendTransaction({ data: initCode });
-    const receipt = await tx.wait();
-    pointers.push(receipt.contractAddress);
-    console.log(`  pointer: ${receipt.contractAddress}  gas: ${receipt.gasUsed.toLocaleString()}`);
+  // Estimate gas
+  const feeData = await provider.getFeeData();
+  const gasPrice = feeData.gasPrice;
+  const ethPrice = 1700; // update if needed
+  let totalGas = 0n;
+  for (let i = 0; i < totalChunks; i++) {
+    const est = await provider.estimateGas({ data: initCodes[i] });
+    totalGas += est;
+    console.log(`  Chunk ${i + 1} estimated gas: ${est.toLocaleString()}`);
+  }
+  const registerEst = 250_000n; // conservative estimate based on Sepolia deploys (~217K actual)
+  totalGas += registerEst;
+  console.log(`  Register estimated gas: ~${registerEst.toLocaleString()} (estimated)`);
+  const totalEth = parseFloat(ethers.formatEther(totalGas * gasPrice));
+  console.log(`\nGas price: ${ethers.formatUnits(gasPrice, 'gwei')} gwei`);
+  console.log(`Total estimated gas: ${totalGas.toLocaleString()}`);
+  console.log(`Estimated cost: ${totalEth.toFixed(4)} ETH (~$${(totalEth * ethPrice).toFixed(2)} at $${ethPrice}/ETH)`);
+
+  if (dryRun) {
+    console.log('\n--dry-run: no transactions sent.');
+    return;
+  }
+
+  console.log('\nProceeding with upload...\n');
+
+  // Step 1: Upload each chunk
+  const pointers = [];
+  for (let i = 0; i < totalChunks; i++) {
+    console.log(`Chunk ${i + 1}/${totalChunks}...`);
+    const tx = await signer.sendTransaction({ data: initCodes[i] });
+    console.log(`  tx: ${tx.hash}`);
+    // Fetch raw receipt to avoid ethers address parsing bug on some RPCs
+    let contractAddress, gasUsed;
+    while (true) {
+      const raw = await provider.send('eth_getTransactionReceipt', [tx.hash]);
+      if (raw && raw.blockNumber) {
+        contractAddress = raw.contractAddress;
+        gasUsed = BigInt(raw.gasUsed);
+        break;
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    pointers.push(contractAddress);
+    console.log(`  pointer: ${contractAddress}  gas: ${gasUsed.toLocaleString()}`);
   }
 
   // Step 2: Register the file by name
@@ -114,7 +143,7 @@ async function main() {
   const receipt = await tx.wait();
   console.log(`gas: ${receipt.gasUsed.toLocaleString()}`);
 
-  console.log(`\nDone. "${FILE_NAME}" is live on EthFS.`);
+  console.log(`\nDone. "${FILE_NAME}" is live on EthFS mainnet.`);
   console.log(`FileStore: ${FILE_STORE_ADDRESS}`);
 }
 

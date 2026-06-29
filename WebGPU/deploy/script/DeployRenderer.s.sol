@@ -21,8 +21,7 @@ import "../src/FrameworksRendererV4.sol";
 ///     --verify
 contract DeployRenderer is Script {
     function run() external {
-        uint256 deployerKey = vm.envUint("PRIVATE_KEY");
-        vm.startBroadcast(deployerKey);
+        vm.startBroadcast();
 
         FrameworksRendererV4 renderer = new FrameworksRendererV4();
 
