@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Frameworks Compositor Test</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #12141a;
+  color: #ccc;
+  font-family: monospace;
+  font-size: 12px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+#controls {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(10,10,14,0.95);
+  border-bottom: 1px solid #333;
+}
+#controls label { color: #999; }
+#controls input[type="text"] {
+  background: #222; color: #ddd; border: 1px solid #555;
+  padding: 4px 8px; font-family: monospace; font-size: 12px; width: 60px;
+}
+#controls button {
+  background: #333; color: #ccc; border: 1px solid #555;
+  padding: 4px 10px; font-family: monospace; font-size: 12px; cursor: pointer;
+}
+#controls button:hover { background: #555; }
+#controls button.primary { background: #2a5a2a; border-color: #4a8a4a; color: #cfc; }
+#controls button.primary:hover { background: #3a7a3a; }
+#status { color: #666; font-size: 11px; margin-left: 8px; }
+
+#grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+  background: #0a0a0e;
+  min-height: 0;
+}
+
+.cell {
+  position: relative;
+  background: #12141a;
+  overflow: hidden;
+}
+
+.cell iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
+
+.cell-label {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  color: #666;
+  font-size: 10px;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.cell-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #444;
+  font-size: 11px;
+  background: #12141a;
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+
+<div id="controls">
+  <label>Tokens:</label>
+  <input type="text" id="id0" value="600">
+  <input type="text" id="id1" value="601">
+  <input type="text" id="id2" value="602">
+  <input type="text" id="id3" value="603">
+  <button class="primary" id="btn-load">Load</button>
+  <span id="status">Ready.</span>
+</div>
+
+<div id="grid">
+  <div class="cell" id="cell0">
+    <div class="cell-label" id="label0">—</div>
+    <div class="cell-loading" id="loading0">waiting</div>
+  </div>
+  <div class="cell" id="cell1">
+    <div class="cell-label" id="label1">—</div>
+    <div class="cell-loading" id="loading1">waiting</div>
+  </div>
+  <div class="cell" id="cell2">
+    <div class="cell-label" id="label2">—</div>
+    <div class="cell-loading" id="loading2">waiting</div>
+  </div>
+  <div class="cell" id="cell3">
+    <div class="cell-label" id="label3">—</div>
+    <div class="cell-loading" id="loading3">waiting</div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<script>
+const COLLECTION = '0xba1901b542aa58f181f7ae18ed6cd79fda779c62';
+const ABI = [
+  'function get(uint256 tokenId) view returns (string name, string description, address[] artifact, uint32 renderer, uint32 mintedBlock, uint64 closeAt, uint128 data)'
+];
+
+const statusEl = document.getElementById('status');
+let viewerHTML = null;
+let provider = null;
+
+async function getProvider() {
+  if (provider) return provider;
+  if (window.ethereum) {
+    provider = new ethers.BrowserProvider(window.ethereum);
+  } else {
+    provider = new ethers.JsonRpcProvider('https://eth.llamarpc.com');
+  }
+  return provider;
+}
+
+async function loadViewerHTML() {
+  if (viewerHTML) return viewerHTML;
+  const res = await fetch('./frameworks-v4-viewer.html');
+  if (!res.ok) throw new Error('Could not load frameworks-v4-viewer.html — make sure it is in the same directory.');
+  viewerHTML = await res.text();
+  return viewerHTML;
+}
+
+function injectCommand(html, cmd) {
+  const injection = `\nlet autoExecuteCommand = ${JSON.stringify(cmd)};\n`;
+  // Insert just before the IIFE opening if present, otherwise before first <script> body
+  if (html.includes('(function() {')) {
+    return html.replace('(function() {', injection + '(function() {');
+  }
+  // Fallback: inject after opening <script> tag
+  return html.replace(/(<script[^>]*>)/, '$1' + injection);
+}
+
+async function loadCell(index, tokenId) {
+  const loadingEl = document.getElementById(`loading${index}`);
+  const labelEl = document.getElementById(`label${index}`);
+  const cellEl = document.getElementById(`cell${index}`);
+
+  loadingEl.textContent = `fetching token ${tokenId}…`;
+  labelEl.textContent = `#${tokenId}`;
+
+  try {
+    const p = await getProvider();
+    const contract = new ethers.Contract(COLLECTION, ABI, p);
+    const token = await contract.get(tokenId);
+
+    const cmd = token.description;
+    if (!cmd) throw new Error('No command string in description field.');
+
+    loadingEl.textContent = `building renderer…`;
+    const html = await loadViewerHTML();
+    const injected = injectCommand(html, cmd);
+
+    // Remove existing iframe if reloading
+    const existing = cellEl.querySelector('iframe');
+    if (existing) {
+      URL.revokeObjectURL(existing._blobUrl);
+      existing.remove();
+    }
+
+    const blob = new Blob([injected], { type: 'text/html' });
+    const blobUrl = URL.createObjectURL(blob);
+
+    const iframe = document.createElement('iframe');
+    iframe._blobUrl = blobUrl;
+    iframe.src = blobUrl;
+    iframe.addEventListener('load', () => {
+      loadingEl.style.display = 'none';
+    });
+    cellEl.appendChild(iframe);
+
+    labelEl.textContent = `#${tokenId} — ${token.name || '(unnamed)'}`;
+
+  } catch (err) {
+    loadingEl.textContent = `error: ${err.message}`;
+    console.error(`[cell ${index}]`, err);
+  }
+}
+
+document.getElementById('btn-load').addEventListener('click', async () => {
+  const ids = [0,1,2,3].map(i => {
+    const val = document.getElementById(`id${i}`).value.trim();
+    return parseInt(val, 10);
+  });
+
+  if (ids.some(isNaN)) {
+    statusEl.textContent = 'Enter valid token IDs.';
+    return;
+  }
+
+  statusEl.textContent = 'Loading…';
+
+  // Reset loading indicators
+  for (let i = 0; i < 4; i++) {
+    const l = document.getElementById(`loading${i}`);
+    l.style.display = '';
+    l.textContent = 'waiting';
+  }
+
+  try {
+    await loadViewerHTML(); // pre-fetch once
+    statusEl.textContent = `Loading tokens ${ids.join(', ')}…`;
+    await Promise.all(ids.map((id, i) => loadCell(i, id)));
+    statusEl.textContent = `Loaded ${ids.join(', ')}.`;
+  } catch (err) {
+    statusEl.textContent = `Error: ${err.message}`;
+  }
+});
+</script>
+</body>
+</html>

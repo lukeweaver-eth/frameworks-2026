@@ -11,6 +11,7 @@ No build step. All files are standalone HTML or plain JS modules. Open in Chrome
 ## Two-File Architecture
 
 - **`frameworks-v4-mint.html`** — local builder. Has ethers CDN, wallet connect, Mint panel. Never uploaded to EthFS. **This is the source of truth** — edit here, then derive the viewer.
+- **`frameworks-v4.1-mint.html`** — next mainnet version in progress. Same architecture as `frameworks-v4-mint.html` but with features not yet deployed (context renderer, etc.). Will become the source of truth for the next deploy cycle (`frameworks_4.1.min.html`).
 - **`frameworks-v4-viewer.html`** — on-chain artifact. **Do not edit directly.** Derived from mint via `deploy/script/derive-viewer.py`. Full interactivity (all keyboard commands, command bar, export) minus chain-interaction buttons, wallet, and PNG export. Wrapped in an IIFE.
 - Minified output (~68KB) is what gets uploaded to EthFS. The renderer contract serves this to token holders.
 
@@ -104,6 +105,13 @@ Full module breakdown for the planned modular refactor (`gpu/`, `core/`, `camera
 
 ### `CONVERSION_PLAN (1).md`
 Detailed V3→V4 mapping. Documents which V3 modules copy verbatim (CommandTree, FrameSelectionContext, ColorContext, PaletteManager) vs. which need adaptation (CommandExecutor, CameraContext, renderer).
+
+### `Context Design/contexts-design.md`
+Full design spec for the context renderer MVP and phase roadmap. Key points:
+- Adds a second GPU pipeline (ortho projection, depth off) drawing context frames over the composition
+- MVP: `ContextRenderer` class (~100 lines), mode indicator (7 frames always visible), palette swatch (11 frames when color context active) — one draw call total, no DOM changes
+- Long-term: context definitions become on-chain frame data (recursive self-hosting). Every near-term architecture decision should be compatible with this.
+- Phase roadmap: MVP → full palette grid (Phase 3) → selection strip (4) → camera context (5) → command history (6) → keyboard context (7) → data-driven (8) → on-chain (9)
 
 ## Critical Gotchas
 
@@ -222,12 +230,20 @@ Frame lines are expanded as world-space quads (`lp.z, lp.w` perp offset in the v
 
 **Fix:** switch to screen-space line width — project the centerline first, then offset in clip/NDC space. Lines would be a fixed pixel width regardless of zoom. This is a vertex shader change only; no CPU-side changes needed.
 
-## Remaining Work (Phase 3–4)
+## Remaining Work
 
+- **Context renderer MVP** — `ContextRenderer` class, second pipeline, mode indicator + palette swatch. See `Context Design/contexts-design.md` for full spec.
 - Modular refactor: extract `gpu/`, `core/`, `camera/`, `commands/`, `contexts/` per `ARCHITECTURE.md`
 - Corner cycling (`q` command, per `CORNER_SYSTEM.md`)
 - `n` key repeat conversion
-- View indicator overlay (colored cube showing active working plane)
 - Save/load (URL hash, localStorage, command string export)
-- Export (SVG, PNG)
 - On-chain command string storage (mint protocol)
+
+### Local-only features (not yet deployed onchain)
+
+These exist in `frameworks-v4-mint.html` but are NOT in the live onchain artifact (`frameworks_4.0.min.html`). They will be included in mainnet v2 (`frameworks_4.1.min.html`):
+- Sketch log + commitments history (two-row command bar)
+- `/` command overlay with n-repeat
+- Command compression (net axis cancellation, repeat notation)
+- Copy ↑ button (appends compressed sketch to commit field)
+- Planned: `~` loop notation and `.` step-pause notation for animated command playback

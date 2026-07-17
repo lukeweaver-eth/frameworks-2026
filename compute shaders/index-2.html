@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Frameworks — WebGPU</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; font-family: monospace; }
+canvas { display: block; width: 100vw; height: 100vh; }
+#info {
+  position: fixed; top: 12px; left: 12px; color: #888; font-size: 13px;
+  pointer-events: none; z-index: 10; line-height: 1.6;
+}
+#info kbd { color: #ccc; background: #222; padding: 1px 5px; border-radius: 3px; }
+#error {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  color: #f44; font-size: 18px; text-align: center; display: none; z-index: 20;
+}
+</style>
+</head>
+<body>
+<div id="info">
+  <kbd>1</kbd> spiral &nbsp; <kbd>2</kbd> noisy grid &nbsp; <kbd>3</kbd> pixel shade &nbsp; <kbd>4</kbd> galaxy<br>
+  scroll to zoom · drag to pan · <span id="stats"></span>
+</div>
+<div id="error">WebGPU not supported in this browser.<br>Try Chrome 113+ or Edge 113+.</div>
+<canvas id="c"></canvas>
+<script type="module" src="main.js"></script>
+</body>
+</html>
