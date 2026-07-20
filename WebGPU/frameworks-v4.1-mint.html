@@ -3789,30 +3789,9 @@ function computeWorldTransforms(store, worldData) {
         }
     }
 
-    // Context visibility filter.
-    // At root (ctxId===null): show everything.
-    // Inside superframe ctxId: show only direct children of ctxId,
-    // their descendants, AND the container frame itself (so you can see the box you're in).
-    const ctxId = currentContextId();
-    if (ctxId !== null) {
-        const ctxFrameIdx = idToIdx.get(ctxId);
-        for (let i = 0; i < n; i++) {
-            // Always show the container superframe itself
-            if (ctxFrameIdx !== undefined && i === ctxFrameIdx) continue;
-            // Show any frame whose ancestor chain passes through ctxId
-            let visible = false;
-            let cur = i;
-            while (cur !== undefined) {
-                const m = store.metadata[cur];
-                if (!m) break;
-                if (m.parentId === ctxId) { visible = true; break; }
-                if (m.parentId === null) break;
-                cur = idToIdx.get(m.parentId);
-            }
-            if (!visible) wf32[i * FLOATS_PER_INSTANCE + F.SCALE] = 0;
-        }
-    }
 }
+// All frames are always visible unless explicitly hidden (FLAG_VISIBLE) or deleted.
+// Context only determines where new frames are created and what # selects — not what renders.
 
 // ============================================================
 // WEBGPU INIT + COMMAND STRING LOADER
