@@ -1778,8 +1778,9 @@ class FrameSelectionContext {
 
         this.store.deselectAll();
         for (const pos of targetPositions) {
-            if (pos >= 0 && pos < inCtx.length) {
-                this.store.setSelected(inCtx[pos], true);
+            const idx = pos - 1; // 1-based input
+            if (idx >= 0 && idx < inCtx.length) {
+                this.store.setSelected(inCtx[idx], true);
             }
         }
     }
@@ -4598,7 +4599,7 @@ async function main() {
           const meta = store.metadata[i];
           if (!meta || meta.parentId !== ctxId) continue;
           const isSel = !!(store.u32[store._o(i) + U.FLAGS] & FLAG_SELECTED);
-          const name = meta.called || `f${localIdx}`;
+          const name = meta.called || `f${localIdx + 1}`;
           const cls = 'layer-row' + (isSel ? ' selected' : '');
           listHtml += `<div class="${cls}"><span class="layer-icon">▪</span><span class="layer-name">${name}</span></div>`;
           localIdx++;
