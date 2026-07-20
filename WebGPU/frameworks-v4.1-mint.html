@@ -403,8 +403,8 @@ canvas { display: block; width: 100vw; height: 100vh; }
 </div>
 
 <div id="graph-overlay">
-  <label>Graph DSL — one path per line: State A > State B > State C — Ctrl+Enter to apply, Escape to cancel</label>
-  <textarea id="graph-input" placeholder="Inside Tie > Fake > Step Outside&#10;Inside Tie > Snap > Head Inside&#10;Collar Tie > Pop > Hand Outside"></textarea>
+  <label>Bulk edit — names fill unnamed frames in order, "name: content" sets both, "A > B" connects. Ctrl+Enter to apply.</label>
+  <textarea id="graph-input" placeholder="Inside Tie&#10;Collar Tie&#10;Elbow Tie: controls wrist&#10;Inside Tie > Fake > Step Outside&#10;#1 > #3"></textarea>
 </div>
 
 <div id="slash-overlay">
@@ -3313,59 +3313,139 @@ class CommandExecutor {
         return store.getFrameId(idx);
     }
 
-    // ── State Graph: parse DSL lines and create states + transitions ────────
+    // ── State Graph: parse DSL — bulk name, write, and connect ────────────
+    //
+    // Modes per line:
+    //   "Name"              → name the next unnamed frame in current context
+    //   "Name: content"     → name + set contents (W field)
+    //   "Name > Name"       → connect two frames by name (creates transition)
+    //   "#3 > #7"           → connect by 1-based position number
+    //   "Name > Name: label"→ connect with a labeled transition
+    //
+    // Plain names are applied to frames in order (first unnamed frame gets
+    // line 1, second gets line 2, etc). Already-named frames are skipped.
+    // If a name matches an existing frame, that frame is updated (not duplicated).
 
     parseGraphDSL(text) {
-        const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        const lines = text.split('\n').filter(l => l.trim().length > 0);
         const store = this.store;
         const ctxId = currentContextId();
 
-        // Track unique state names for positioning
-        const allNames = new Set();
-        for (const line of lines) {
-            const parts = line.split('>').map(p => p.trim()).filter(p => p.length > 0);
-            for (const p of parts) allNames.add(p);
+        // Build ordered list of frames in current context
+        const inCtx = [];
+        for (let i = 0; i < store.count; i++) {
+            const meta = store.metadata[i];
+            if (meta && meta.parentId === ctxId && meta.kind !== 'trans') inCtx.push(i);
         }
-        const nameList = [...allNames];
 
-        store.deselectAll();
+        // Track which unnamed frames we've assigned names to
+        let nextUnnamed = 0;
 
-        for (const line of lines) {
-            const parts = line.split('>').map(p => p.trim()).filter(p => p.length > 0);
-            if (parts.length < 2) continue;
-
-            for (let j = 0; j < parts.length - 1; j++) {
-                const srcName = parts[j];
-                const tgtName = parts[j + 1];
-                const srcId = this._findOrCreateStateByName(srcName, nameList.indexOf(srcName), nameList.length);
-                const tgtId = this._findOrCreateStateByName(tgtName, nameList.indexOf(tgtName), nameList.length);
-
-                // Check if this transition already exists
-                let exists = false;
-                for (let i = 0; i < store.count; i++) {
-                    const meta = store.metadata[i];
-                    if (!meta || meta.kind !== 'trans' || meta.parentId !== ctxId) continue;
-                    if (meta.contexts[0] === srcId && meta.contexts[1] === tgtId) { exists = true; break; }
-                }
-                if (exists) continue;
-
-                // Find world positions for midpoint
-                const srcIdx = this._findByFrameId(srcId);
-                const tgtIdx = this._findByFrameId(tgtId);
-                if (srcIdx === -1 || tgtIdx === -1) continue;
-                const so = store._o(srcIdx), to_ = store._o(tgtIdx);
-                const mx = (store.f32[so + F.PX] + store.f32[to_ + F.PX]) / 2;
-                const my = (store.f32[so + F.PY] + store.f32[to_ + F.PY]) / 2;
-                const mz = (store.f32[so + F.PZ] + store.f32[to_ + F.PZ]) / 2;
-
-                const transIdx = store.addFrame(mx, my, mz, 0, 0, 1, 1.0, this.palette.currentIndex);
-                store.metadata[transIdx].kind = 'trans';
-                store.metadata[transIdx].contexts = [srcId, tgtId];
-                store.metadata[transIdx].parentId = ctxId;
-                // Don't select transition frames
-                store.setSelected(transIdx, false);
+        // Helper: resolve a name/number reference to a frame index
+        const resolveRef = (ref) => {
+            ref = ref.trim();
+            // #N → 1-based position
+            if (ref.startsWith('#')) {
+                const pos = parseInt(ref.slice(1));
+                if (!isNaN(pos) && pos >= 1 && pos <= inCtx.length) return inCtx[pos - 1];
+                return -1;
             }
+            // Search by name in current context
+            for (const idx of inCtx) {
+                if (store.metadata[idx].called === ref) return idx;
+            }
+            // Try to create if not found
+            return this._findByFrameId(
+                this._findOrCreateStateByName(ref, inCtx.length, inCtx.length + 1)
+            );
+        };
+
+        // Helper: create transition between two frame indices
+        const connectFrames = (srcIdx, tgtIdx, label) => {
+            if (srcIdx === -1 || tgtIdx === -1) return;
+            const srcId = store.getFrameId(srcIdx);
+            const tgtId = store.getFrameId(tgtIdx);
+            // Check for existing transition
+            for (let i = 0; i < store.count; i++) {
+                const meta = store.metadata[i];
+                if (meta && meta.kind === 'trans' && meta.parentId === ctxId &&
+                    meta.contexts[0] === srcId && meta.contexts[1] === tgtId) return;
+            }
+            const so = store._o(srcIdx), to_ = store._o(tgtIdx);
+            const mx = (store.f32[so + F.PX] + store.f32[to_ + F.PX]) / 2;
+            const my = (store.f32[so + F.PY] + store.f32[to_ + F.PY]) / 2;
+            const mz = (store.f32[so + F.PZ] + store.f32[to_ + F.PZ]) / 2;
+            const transIdx = store.addFrame(mx, my, mz, 0, 0, 1, 1.0, this.palette.currentIndex);
+            store.metadata[transIdx].kind = 'trans';
+            store.metadata[transIdx].contexts = [srcId, tgtId];
+            store.metadata[transIdx].parentId = ctxId;
+            if (label) store.metadata[transIdx].called = label;
+            store.setSelected(transIdx, false);
+        };
+
+        for (const rawLine of lines) {
+            const line = rawLine.trim();
+
+            // Connection line: contains >
+            if (line.includes('>')) {
+                // Split on > for chain connections
+                const segments = line.split('>').map(s => s.trim()).filter(s => s.length > 0);
+                // Last segment might have ": label"
+                let lastLabel = '';
+                if (segments.length >= 2) {
+                    const lastSeg = segments[segments.length - 1];
+                    const colonIdx = lastSeg.indexOf(':');
+                    if (colonIdx !== -1) {
+                        lastLabel = lastSeg.slice(colonIdx + 1).trim();
+                        segments[segments.length - 1] = lastSeg.slice(0, colonIdx).trim();
+                    }
+                }
+                for (let j = 0; j < segments.length - 1; j++) {
+                    const srcIdx = resolveRef(segments[j]);
+                    const tgtIdx = resolveRef(segments[j + 1]);
+                    const label = (j === segments.length - 2) ? lastLabel : '';
+                    connectFrames(srcIdx, tgtIdx, label);
+                }
+                continue;
+            }
+
+            // Name/content line
+            let name = line;
+            let content = '';
+            const colonIdx = line.indexOf(':');
+            if (colonIdx !== -1) {
+                name = line.slice(0, colonIdx).trim();
+                content = line.slice(colonIdx + 1).trim();
+            }
+
+            if (!name) continue;
+
+            // Find next unnamed frame in context, or find existing frame with this name
+            let targetIdx = -1;
+
+            // First check if a frame with this name already exists
+            for (const idx of inCtx) {
+                if (store.metadata[idx].called === name) { targetIdx = idx; break; }
+            }
+
+            // Otherwise assign to next unnamed frame
+            if (targetIdx === -1) {
+                while (nextUnnamed < inCtx.length) {
+                    if (!store.metadata[inCtx[nextUnnamed]].called) {
+                        targetIdx = inCtx[nextUnnamed];
+                        nextUnnamed++;
+                        break;
+                    }
+                    nextUnnamed++;
+                }
+            }
+
+            if (targetIdx === -1) continue; // no more frames to name
+
+            store.metadata[targetIdx].called = name;
+            if (content) store.metadata[targetIdx].contents = content;
         }
+
         store._markAllDirty();
     }
 
@@ -3375,9 +3455,30 @@ class CommandExecutor {
         const overlay = document.getElementById('graph-overlay');
         const input = document.getElementById('graph-input');
         if (!overlay || !input) return;
+
+        // Pre-populate with current context's frames
+        const store = this.store;
+        const ctxId = currentContextId();
+        let prefill = '';
+        let pos = 0;
+        for (let i = 0; i < store.count; i++) {
+            const meta = store.metadata[i];
+            if (!meta || meta.parentId !== ctxId || meta.kind === 'trans') continue;
+            pos++;
+            const name = meta.called || '';
+            const content = meta.contents || '';
+            if (name && content) {
+                prefill += `${name}: ${content}\n`;
+            } else if (name) {
+                prefill += `${name}\n`;
+            } else {
+                prefill += `\n`; // empty line for unnamed frame
+            }
+        }
+
         overlay.classList.add('active');
-        input.value = '';
-        setTimeout(() => input.focus(), 0);
+        input.value = prefill;
+        setTimeout(() => { input.focus(); input.setSelectionRange(0, 0); }, 0);
     }
 
     getCornerCoordinates(cornerIndex, bbox) {
