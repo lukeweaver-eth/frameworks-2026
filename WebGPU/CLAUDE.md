@@ -90,13 +90,14 @@ Command strings record every keypress. The notation `(dR,3)` means repeat `dR` t
 
 ## Key Files
 
-### `frame-store.js`
-Complete FrameStore implementation. Key methods:
+### FrameStore (inline in `frameworks-v4-mint.html`)
+`frame-store.js` does not exist as a separate file — FrameStore is defined inline. Key methods:
 - `addFrame(x, y, z, nx, ny, nz, scale, colorIndex)` — creates frame, assigns frameId
 - `translateSelected(dx, dy, dz)` / `rotateSelected(cx, cy, cz, angle, view)`
 - `duplicateSelected()` / `deleteSelected()`
 - `reflectSelectedH()` / `reflectSelectedV()` — flips position + normal only (NOT right/up)
 - `scaleSelected(factor)` / `scaleSelectionGroup(factor)`
+- `selectAllOfColor()` / `invertSelection()` / `selectAll()`
 - `shiftSelectedColors(shift, paletteSize)`
 - `getDirtyRange()` / `clearDirty()` — partial GPU upload tracking
 
@@ -234,8 +235,6 @@ Frame lines are expanded as world-space quads (`lp.z, lp.w` perp offset in the v
 
 - **Context renderer MVP** — `ContextRenderer` class, second pipeline, mode indicator + palette swatch. See `Context Design/contexts-design.md` for full spec.
 - Modular refactor: extract `gpu/`, `core/`, `camera/`, `commands/`, `contexts/` per `ARCHITECTURE.md`
-- Corner cycling (`q` command, per `CORNER_SYSTEM.md`)
-- `n` key repeat conversion
 - Save/load (URL hash, localStorage, command string export)
 - On-chain command string storage (mint protocol)
 
