@@ -124,6 +124,19 @@ canvas { display: block; width: 100vw; height: 100vh; }
   font-family: inherit; font-size: 14px; width: 100%; height: 120px; resize: vertical;
 }
 
+/* Graph DSL overlay */
+#graph-overlay {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: rgba(10,10,14,0.95); border: 2px solid #555; padding: 16px;
+  display: none; pointer-events: all; z-index: 200; min-width: 500px;
+}
+#graph-overlay.active { display: block; }
+#graph-overlay label { color: #999; font-size: 11px; display: block; margin-bottom: 6px; }
+#graph-input {
+  background: #222; color: #ddd; border: 1px solid #555; padding: 8px;
+  font-family: inherit; font-size: 13px; width: 100%; height: 200px; resize: vertical;
+}
+
 /* / command overlay */
 #slash-overlay {
   position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%);
@@ -389,6 +402,11 @@ canvas { display: block; width: 100vw; height: 100vh; }
   <textarea id="W-input" placeholder="Frame contents..."></textarea>
 </div>
 
+<div id="graph-overlay">
+  <label>Graph DSL — one path per line: State A > State B > State C — Ctrl+Enter to apply, Escape to cancel</label>
+  <textarea id="graph-input" placeholder="Inside Tie > Fake > Step Outside&#10;Inside Tie > Snap > Head Inside&#10;Collar Tie > Pop > Hand Outside"></textarea>
+</div>
+
 <div id="slash-overlay">
   <label>/ command:</label>
   <input type="text" id="slash-input" placeholder="e.g. fp or (dR,4)">
@@ -547,7 +565,7 @@ class FrameStore {
         this.u32[o + U.FLAGS] = FLAG_SELECTED | FLAG_VISIBLE;
         this.u32[o + U.FRAME_ID] = this._frameIdCounter++;
 
-        this.metadata[i] = { called: '', contents: '', contexts: [], components: [], parentId: null, isSuperframe: false, localCamera: null };
+        this.metadata[i] = { called: '', contents: '', contexts: [], components: [], parentId: null, isSuperframe: false, localCamera: null, kind: 'state' };
         this._markDirty(i);
         return i;
     }
@@ -573,7 +591,7 @@ class FrameStore {
             this.u32[o + U.COLOR_INDEX] = colorFn ? colorFn(i) : (i % 80);
             this.u32[o + U.FLAGS] = FLAG_VISIBLE;
             this.u32[o + U.FRAME_ID] = this._frameIdCounter++;
-            this.metadata[idx] = { called: '', contents: '', contexts: [], components: [], parentId: null, isSuperframe: false, localCamera: null };
+            this.metadata[idx] = { called: '', contents: '', contexts: [], components: [], parentId: null, isSuperframe: false, localCamera: null, kind: 'state' };
         }
         this._markRangeDirty(start, n);
     }
@@ -1030,6 +1048,7 @@ class FrameStore {
                 parentId: newParentId,
                 isSuperframe: srcMeta ? srcMeta.isSuperframe : false,
                 localCamera: srcMeta && srcMeta.localCamera ? { ...srcMeta.localCamera } : null,
+                kind: srcMeta ? srcMeta.kind : 'state',
             };
 
             this._markDirty(newIdx);
@@ -2423,11 +2442,13 @@ class CommandExecutor {
             case 'F':
                 this.createSuperframe();
                 this.commandTree.addCommand(key);
+                this.openWriteOverlay('w'); // auto-name the new frame
                 break;
 
             case 'f':
                 this.createFrame();
                 this.commandTree.addCommand(key);
+                this.openWriteOverlay('w'); // auto-name the new frame
                 break;
 
             case 'd':
@@ -2533,6 +2554,18 @@ class CommandExecutor {
             case '#':
                 this.selectionContext.enter();
                 this.commandTree.addCommand(key);
+                break;
+
+            case 'g': {
+                const transIdx = this.connectSelected();
+                if (transIdx !== null) {
+                    this.openWriteOverlay('w'); // name the transition
+                }
+                this.commandTree.addCommand(key);
+                break;
+            }
+            case 'G':
+                this.openGraphOverlay();
                 break;
 
             case 'q':
@@ -2823,6 +2856,12 @@ class CommandExecutor {
                 break;
             case '#':
                 this.selectionContext.enter();
+                break;
+            case 'g':
+                this.connectSelected();
+                break;
+            case 'G':
+                /* handled by interactive overlay only */
                 break;
             case '0': case '1': case '2': case '3': case '4': case '5': case '6':
                 this.currentView = parseInt(key);
@@ -3219,6 +3258,126 @@ class CommandExecutor {
             this.cursor.x, this.cursor.y, this.cursor.z,
             currentContextId()
         );
+    }
+
+    // ── State Graph: connect two selected frames with a transition ──────────
+
+    connectSelected() {
+        const store = this.store;
+        const ctxId = currentContextId();
+        const sel = [];
+        for (let i = 0; i < store.count; i++) {
+            const meta = store.metadata[i];
+            if (!meta || meta.parentId !== ctxId) continue;
+            if (store.u32[store._o(i) + U.FLAGS] & FLAG_SELECTED) sel.push(i);
+        }
+        if (sel.length < 2) return null;
+        // First two selected frames become source and target
+        const srcIdx = sel[0], tgtIdx = sel[1];
+        const srcId = store.getFrameId(srcIdx);
+        const tgtId = store.getFrameId(tgtIdx);
+        const so = store._o(srcIdx), to_ = store._o(tgtIdx);
+        const mx = (store.f32[so + F.PX] + store.f32[to_ + F.PX]) / 2;
+        const my = (store.f32[so + F.PY] + store.f32[to_ + F.PY]) / 2;
+        const mz = (store.f32[so + F.PZ] + store.f32[to_ + F.PZ]) / 2;
+
+        store.deselectAll();
+        const transIdx = store.addFrame(mx, my, mz, 0, 0, 1, 1.0, this.palette.currentIndex);
+        store.metadata[transIdx].kind = 'trans';
+        store.metadata[transIdx].contexts = [srcId, tgtId];
+        store.metadata[transIdx].parentId = ctxId;
+        store.setSelected(transIdx, true);
+        return transIdx;
+    }
+
+    // ── State Graph: find or create a state frame by name in current context ──
+
+    _findOrCreateStateByName(name, posIndex, totalCount) {
+        const store = this.store;
+        const ctxId = currentContextId();
+        // Search for existing frame with this name in current context
+        for (let i = 0; i < store.count; i++) {
+            const meta = store.metadata[i];
+            if (!meta || meta.parentId !== ctxId) continue;
+            if (meta.kind !== 'state' && meta.kind !== 'super') continue;
+            if (meta.called === name) return store.getFrameId(i);
+        }
+        // Create new frame, space them horizontally
+        const spacing = 4;
+        const x = posIndex * spacing;
+        const y = 0;
+        const idx = store.addFrame(x, y, 0, 0, 0, 1, 2.0, this.palette.getNextColor());
+        store.metadata[idx].parentId = ctxId;
+        store.metadata[idx].called = name;
+        store.metadata[idx].kind = 'state';
+        return store.getFrameId(idx);
+    }
+
+    // ── State Graph: parse DSL lines and create states + transitions ────────
+
+    parseGraphDSL(text) {
+        const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        const store = this.store;
+        const ctxId = currentContextId();
+
+        // Track unique state names for positioning
+        const allNames = new Set();
+        for (const line of lines) {
+            const parts = line.split('>').map(p => p.trim()).filter(p => p.length > 0);
+            for (const p of parts) allNames.add(p);
+        }
+        const nameList = [...allNames];
+
+        store.deselectAll();
+
+        for (const line of lines) {
+            const parts = line.split('>').map(p => p.trim()).filter(p => p.length > 0);
+            if (parts.length < 2) continue;
+
+            for (let j = 0; j < parts.length - 1; j++) {
+                const srcName = parts[j];
+                const tgtName = parts[j + 1];
+                const srcId = this._findOrCreateStateByName(srcName, nameList.indexOf(srcName), nameList.length);
+                const tgtId = this._findOrCreateStateByName(tgtName, nameList.indexOf(tgtName), nameList.length);
+
+                // Check if this transition already exists
+                let exists = false;
+                for (let i = 0; i < store.count; i++) {
+                    const meta = store.metadata[i];
+                    if (!meta || meta.kind !== 'trans' || meta.parentId !== ctxId) continue;
+                    if (meta.contexts[0] === srcId && meta.contexts[1] === tgtId) { exists = true; break; }
+                }
+                if (exists) continue;
+
+                // Find world positions for midpoint
+                const srcIdx = this._findByFrameId(srcId);
+                const tgtIdx = this._findByFrameId(tgtId);
+                if (srcIdx === -1 || tgtIdx === -1) continue;
+                const so = store._o(srcIdx), to_ = store._o(tgtIdx);
+                const mx = (store.f32[so + F.PX] + store.f32[to_ + F.PX]) / 2;
+                const my = (store.f32[so + F.PY] + store.f32[to_ + F.PY]) / 2;
+                const mz = (store.f32[so + F.PZ] + store.f32[to_ + F.PZ]) / 2;
+
+                const transIdx = store.addFrame(mx, my, mz, 0, 0, 1, 1.0, this.palette.currentIndex);
+                store.metadata[transIdx].kind = 'trans';
+                store.metadata[transIdx].contexts = [srcId, tgtId];
+                store.metadata[transIdx].parentId = ctxId;
+                // Don't select transition frames
+                store.setSelected(transIdx, false);
+            }
+        }
+        store._markAllDirty();
+    }
+
+    // ── State Graph: open graph DSL overlay ─────────────────────────────────
+
+    openGraphOverlay() {
+        const overlay = document.getElementById('graph-overlay');
+        const input = document.getElementById('graph-input');
+        if (!overlay || !input) return;
+        overlay.classList.add('active');
+        input.value = '';
+        setTimeout(() => input.focus(), 0);
     }
 
     getCornerCoordinates(cornerIndex, bbox) {
@@ -3856,6 +4015,13 @@ function computeWorldTransforms(store, worldData) {
         }
     }
 
+    // Hide transition frames from crosshatch render (scale=0 in world buffer only)
+    for (let i = 0; i < n; i++) {
+        const meta = store.metadata[i];
+        if (meta && meta.kind === 'trans') {
+            wf32[i * FLOATS_PER_INSTANCE + F.SCALE] = 0;
+        }
+    }
 }
 // All frames are always visible unless explicitly hidden (FLAG_VISIBLE) or deleted.
 // Context only determines where new frames are created and what # selects — not what renders.
@@ -4201,6 +4367,22 @@ async function main() {
     lastSlashRepeatCount = 1;
   }
 
+  document.getElementById('graph-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      const text = e.target.value.trim();
+      document.getElementById('graph-overlay').classList.remove('active');
+      if (text) {
+        executor.parseGraphDSL(text);
+        showLabels = true; // auto-show labels so state names are visible
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      document.getElementById('graph-overlay').classList.remove('active');
+    }
+    e.stopPropagation();
+  });
+
   document.getElementById('slash-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -4396,7 +4578,7 @@ async function main() {
     // Append to sketch log for meaningful keys only
     const SKETCH_KEYS = new Set([
       'F','f','d','D','x','t','T','s','S','r','R','e','E','h','H',
-      'q','Q','a','A','c','C','z','Z',' ','m','p','P','v','#',
+      'q','Q','a','A','c','C','z','Z',' ','m','p','P','v','#','g','G',
       'i','j','k','l','I','J','K','L',
       '0','1','2','3','4','5','6',
     ]);
@@ -4636,9 +4818,19 @@ async function main() {
           const meta = store.metadata[i];
           if (!meta || meta.parentId !== ctxId) continue;
           const isSel = !!(store.u32[store._o(i) + U.FLAGS] & FLAG_SELECTED);
-          const name = meta.called || `f${localIdx + 1}`;
+          const kind = meta.kind || 'state';
+          const icon = kind === 'trans' ? '→' : kind === 'initial' ? '●' : kind === 'final' ? '◎' : '▪';
+          let name = meta.called || (kind === 'trans' ? `→${localIdx + 1}` : `f${localIdx + 1}`);
+          if (kind === 'trans' && meta.contexts.length === 2) {
+            // Show source→target names
+            const srcIdx2 = executor._findByFrameId(meta.contexts[0]);
+            const tgtIdx2 = executor._findByFrameId(meta.contexts[1]);
+            const srcName = srcIdx2 !== -1 && store.metadata[srcIdx2].called ? store.metadata[srcIdx2].called : `#${meta.contexts[0]}`;
+            const tgtName = tgtIdx2 !== -1 && store.metadata[tgtIdx2].called ? store.metadata[tgtIdx2].called : `#${meta.contexts[1]}`;
+            name = `${srcName} → ${tgtName}` + (meta.called ? ` [${meta.called}]` : '');
+          }
           const cls = 'layer-row' + (isSel ? ' selected' : '');
-          listHtml += `<div class="${cls}"><span class="layer-icon">▪</span><span class="layer-name">${name}</span></div>`;
+          listHtml += `<div class="${cls}"><span class="layer-icon">${icon}</span><span class="layer-name">${name}</span></div>`;
           localIdx++;
         }
         if (!listHtml) listHtml = '<div style="padding:6px 10px;color:#444;font-size:10px;">(empty)</div>';
@@ -4652,26 +4844,102 @@ async function main() {
     if (showLabels && n > 0) {
       labelCtx.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
       const dpr = window.devicePixelRatio || 1;
+      const vp = cam.vp;
+      const wf = store.lastWorldF32 || store.f32;
+
+      function projectPt(wx, wy, wz) {
+        const cx = vp[0]*wx + vp[4]*wy + vp[8]*wz  + vp[12];
+        const cy = vp[1]*wx + vp[5]*wy + vp[9]*wz  + vp[13];
+        const cw = vp[3]*wx + vp[7]*wy + vp[11]*wz + vp[15];
+        if (cw <= 0) return null;
+        return [((cx / cw) * 0.5 + 0.5) * labelCanvas.width,
+                ((1 - cy / cw) * 0.5) * labelCanvas.height];
+      }
+
+      // Draw state labels
       labelCtx.font = `${Math.round(13 * dpr)}px 'SF Mono', 'Fira Code', monospace`;
       labelCtx.textAlign = 'center';
       for (let i = 0; i < store.count; i++) {
         const meta = store.metadata[i];
-        if (!meta.called) continue;
+        if (!meta || !meta.called || meta.kind === 'trans') continue;
         const o = store._o(i);
-        const px = store.f32[o], py = store.f32[o+1], pz = store.f32[o+2];
-        // Project world pos to NDC via VP matrix
-        const vp = cam.vp;
-        const cx = vp[0]*px + vp[4]*py + vp[8]*pz  + vp[12];
-        const cy = vp[1]*px + vp[5]*py + vp[9]*pz  + vp[13];
-        const cw = vp[3]*px + vp[7]*py + vp[11]*pz + vp[15];
-        if (cw <= 0) continue;
-        const sx = ((cx / cw) * 0.5 + 0.5) * labelCanvas.width;
-        const sy = ((1 - cy / cw) * 0.5) * labelCanvas.height;
+        const pt = projectPt(wf[o], wf[o+1], wf[o+2]);
+        if (!pt) continue;
+        const [sx, sy] = pt;
         labelCtx.fillStyle = 'rgba(0,0,0,0.55)';
         const tw = labelCtx.measureText(meta.called).width;
         labelCtx.fillRect(sx - tw/2 - 4, sy - 14 * dpr, tw + 8, 18 * dpr);
         labelCtx.fillStyle = '#ddd';
         labelCtx.fillText(meta.called, sx, sy);
+      }
+
+      // Draw transition arrows
+      labelCtx.lineWidth = 2 * dpr;
+      for (let i = 0; i < store.count; i++) {
+        const meta = store.metadata[i];
+        if (!meta || meta.kind !== 'trans') continue;
+        const [srcId, tgtId] = meta.contexts;
+        if (srcId == null || tgtId == null) continue;
+        // Find source and target indices
+        let srcIdx = -1, tgtIdx = -1;
+        for (let j = 0; j < store.count; j++) {
+          const fid = store.u32[store._o(j) + U.FRAME_ID];
+          if (fid === srcId) srcIdx = j;
+          if (fid === tgtId) tgtIdx = j;
+        }
+        if (srcIdx === -1 || tgtIdx === -1) continue;
+        const so = store._o(srcIdx), to_ = store._o(tgtIdx);
+        const sp = projectPt(wf[so], wf[so+1], wf[so+2]);
+        const tp = projectPt(wf[to_], wf[to_+1], wf[to_+2]);
+        if (!sp || !tp) continue;
+
+        // Get color from transition frame's palette index
+        const ci = store.u32[store._o(i) + U.COLOR_INDEX];
+        const [cr, cg, cb] = palette.colors[ci % palette.size];
+        const colStr = `rgb(${(cr*255)|0},${(cg*255)|0},${(cb*255)|0})`;
+        labelCtx.strokeStyle = colStr;
+        labelCtx.fillStyle = colStr;
+
+        // Draw line
+        const dx = tp[0] - sp[0], dy = tp[1] - sp[1];
+        const len = Math.sqrt(dx*dx + dy*dy);
+        if (len < 1) continue;
+        const nx = dx / len, ny = dy / len;
+
+        // Offset endpoints slightly from state centers
+        const offset = 16 * dpr;
+        const x1 = sp[0] + nx * offset, y1 = sp[1] + ny * offset;
+        const x2 = tp[0] - nx * offset, y2 = tp[1] - ny * offset;
+
+        labelCtx.beginPath();
+        labelCtx.moveTo(x1, y1);
+        labelCtx.lineTo(x2, y2);
+        labelCtx.stroke();
+
+        // Arrowhead
+        const aLen = 10 * dpr, aW = 5 * dpr;
+        labelCtx.beginPath();
+        labelCtx.moveTo(x2, y2);
+        labelCtx.lineTo(x2 - nx * aLen + ny * aW, y2 - ny * aLen - nx * aW);
+        labelCtx.lineTo(x2 - nx * aLen - ny * aW, y2 - ny * aLen + nx * aW);
+        labelCtx.closePath();
+        labelCtx.fill();
+
+        // Transition label at midpoint
+        if (meta.called) {
+          const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+          labelCtx.font = `${Math.round(10 * dpr)}px 'SF Mono', 'Fira Code', monospace`;
+          labelCtx.textAlign = 'center';
+          const tw = labelCtx.measureText(meta.called).width;
+          // Offset label perpendicular to arrow
+          const perpX = -ny * 12 * dpr, perpY = nx * 12 * dpr;
+          labelCtx.fillStyle = 'rgba(0,0,0,0.6)';
+          labelCtx.fillRect(mx + perpX - tw/2 - 3, my + perpY - 10 * dpr, tw + 6, 14 * dpr);
+          labelCtx.fillStyle = colStr;
+          labelCtx.fillText(meta.called, mx + perpX, my + perpY);
+          // Restore font for next state label
+          labelCtx.font = `${Math.round(13 * dpr)}px 'SF Mono', 'Fira Code', monospace`;
+        }
       }
     } else if (!showLabels) {
       labelCtx.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
