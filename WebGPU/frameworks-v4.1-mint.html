@@ -1096,13 +1096,33 @@ class FrameStore {
         this.translateSelected(dx, dy, dz);
     }
 
-    centerStructureToCursor(cursorX, cursorY, cursorZ) {
+    centerStructureToCursor(cursorX, cursorY, cursorZ, contextId) {
         if (this.count === 0) return;
-        const bbox = this.getBoundingBox();
-        const dx = cursorX - bbox.centerX;
-        const dy = cursorY - bbox.centerY;
-        const dz = cursorZ - bbox.centerZ;
+        // Compute fresh world transforms to get accurate positions after any in-flight changes.
+        const worldF32 = new Float32Array(this.count * FLOATS_PER_INSTANCE);
+        computeWorldTransforms(this, worldF32);
+        // Bounding box over all frames using world positions
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        let minZ = Infinity, maxZ = -Infinity;
         for (let i = 0; i < this.count; i++) {
+            const o = this._o(i);
+            const hs = this.f32[o + F.SCALE] / 2;
+            const x = worldF32[o], y = worldF32[o+1], z = worldF32[o+2];
+            if (x - hs < minX) minX = x - hs;
+            if (x + hs > maxX) maxX = x + hs;
+            if (y - hs < minY) minY = y - hs;
+            if (y + hs > maxY) maxY = y + hs;
+            if (z - hs < minZ) minZ = z - hs;
+            if (z + hs > maxZ) maxZ = z + hs;
+        }
+        const dx = cursorX - (minX + maxX) / 2;
+        const dy = cursorY - (minY + maxY) / 2;
+        const dz = cursorZ - (minZ + maxZ) / 2;
+        // Only translate root-level frames (direct children of current context). Children follow automatically.
+        for (let i = 0; i < this.count; i++) {
+            const meta = this.metadata[i];
+            if (!meta || meta.parentId !== contextId) continue;
             this.translate(i, dx, dy, dz);
         }
     }
@@ -1745,6 +1765,7 @@ class FrameSelectionContext {
 
     submitBracketInput(text) {
         this.closeBracketInput();
+        this.active = false; // exit selection context after bracket submission
         if (!text || text.trim().length === 0) return;
 
         text = text.trim();
@@ -2090,7 +2111,19 @@ class CommandExecutor {
             }
 
             if (this.colorContext.active) {
-                this.handleColorContextNavigation(key);
+                // If we see 'c' followed by a context-nav key, apply color first then handle ci/ck/etc normally
+                if (key === 'c' && i + 1 < expanded.length && ['i','k','j','l'].includes(expanded[i + 1])) {
+                    this.colorContext.apply();
+                    this.colorContext.exit();
+                    i++;
+                    const nav = expanded[i];
+                    if (nav === 'i') this.contextUp();
+                    else if (nav === 'k') this.contextDown();
+                    else if (nav === 'j') this.contextCycleBack();
+                    else if (nav === 'l') this.contextCycleForward();
+                } else {
+                    this.handleColorContextNavigation(key);
+                }
             } else if (this.cameraContext.active) {
                 this.handleCameraContextNavigation(key, false);
             } else if (this.selectionContext.active) {
@@ -3182,7 +3215,10 @@ class CommandExecutor {
     }
 
     centerStructureToCursor() {
-        this.store.centerStructureToCursor(this.cursor.x, this.cursor.y, this.cursor.z);
+        this.store.centerStructureToCursor(
+            this.cursor.x, this.cursor.y, this.cursor.z,
+            currentContextId()
+        );
     }
 
     getCornerCoordinates(cornerIndex, bbox) {
@@ -4406,6 +4442,7 @@ async function main() {
     if (n > 0) {
       const worldData = new Float32Array(n * FLOATS_PER_INSTANCE);
       computeWorldTransforms(store, worldData);
+      store.lastWorldF32 = worldData; // cache for CPU-side world-space queries (e.g. Z snap)
       device.queue.writeBuffer(worldBuf, 0, worldData.buffer, 0, n * BYTES_PER_INSTANCE);
     }
 
