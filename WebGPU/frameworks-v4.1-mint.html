@@ -1632,43 +1632,66 @@ class FrameSelectionContext {
         this.closeBracketInput();
     }
 
-    // ── ijkl: Selection window ──────────────────────────────
+    // Returns ordered array of store indices for frames in the current context
+    _ctxFrames() {
+        const ctxId = currentContextId();
+        const result = [];
+        for (let i = 0; i < this.store.count; i++) {
+            const meta = this.store.metadata[i];
+            if (meta && meta.parentId === ctxId) result.push(i);
+        }
+        return result;
+    }
+
+    // Returns {loPos, hiPos} of selected frames within the context list, or null
+    _ctxSelectionBounds(inCtx) {
+        let lo = -1, hi = -1;
+        for (let p = 0; p < inCtx.length; p++) {
+            if (this.store.u32[this.store._o(inCtx[p]) + U.FLAGS] & FLAG_SELECTED) {
+                if (lo === -1) lo = p;
+                hi = p;
+            }
+        }
+        return { lo, hi, count: lo === -1 ? 0 : hi - lo + 1 };
+    }
+
+    // ── ijkl: Selection window (context-scoped) ─────────────
 
     extendTop() {
-        const { lo, hi, count } = this.store.getSelectionBoundsIdx();
-        if (count === 0) {
-            if (this.store.count > 0) this.store.setSelected(0, true);
-            return;
-        }
-        if (hi < this.store.count - 1) this.store.setSelected(hi + 1, true);
+        const inCtx = this._ctxFrames();
+        if (inCtx.length === 0) return;
+        const { lo, hi, count } = this._ctxSelectionBounds(inCtx);
+        if (count === 0) { this.store.setSelected(inCtx[0], true); return; }
+        if (hi < inCtx.length - 1) this.store.setSelected(inCtx[hi + 1], true);
     }
 
     extendBottom() {
-        const { lo, hi, count } = this.store.getSelectionBoundsIdx();
-        if (count === 0) {
-            if (this.store.count > 0) this.store.setSelected(this.store.count - 1, true);
-            return;
-        }
-        if (lo > 0) this.store.setSelected(lo - 1, true);
+        const inCtx = this._ctxFrames();
+        if (inCtx.length === 0) return;
+        const { lo, hi, count } = this._ctxSelectionBounds(inCtx);
+        if (count === 0) { this.store.setSelected(inCtx[inCtx.length - 1], true); return; }
+        if (lo > 0) this.store.setSelected(inCtx[lo - 1], true);
     }
 
     shiftUp() {
-        const { lo, hi, count } = this.store.getSelectionBoundsIdx();
+        const inCtx = this._ctxFrames();
+        if (inCtx.length === 0) return;
+        const { lo, hi, count } = this._ctxSelectionBounds(inCtx);
         if (count === 0) return;
-        const n = this.store.count;
-        this.store.setSelected(lo, false);
-        this.store.setSelected((hi + 1) % n, true);
+        this.store.setSelected(inCtx[lo], false);
+        this.store.setSelected(inCtx[(hi + 1) % inCtx.length], true);
     }
 
     shiftDown() {
-        const { lo, hi, count } = this.store.getSelectionBoundsIdx();
+        const inCtx = this._ctxFrames();
+        if (inCtx.length === 0) return;
+        const { lo, hi, count } = this._ctxSelectionBounds(inCtx);
         if (count === 0) return;
-        const n = this.store.count;
-        this.store.setSelected(hi, false);
-        this.store.setSelected((lo - 1 + n) % n, true);
+        this.store.setSelected(inCtx[hi], false);
+        this.store.setSelected(inCtx[(lo - 1 + inCtx.length) % inCtx.length], true);
     }
 
-    // ── IJKL: Reorder + Contract ────────────────────────────
+    // ── IJKL: Reorder + Contract (context-scoped) ───────────
 
     moveUp() {
         this.store.moveSelectedUp();
@@ -1679,13 +1702,15 @@ class FrameSelectionContext {
     }
 
     contractTop() {
-        const { hi, count } = this.store.getSelectionBoundsIdx();
-        if (count > 0) this.store.setSelected(hi, false);
+        const inCtx = this._ctxFrames();
+        const { hi, count } = this._ctxSelectionBounds(inCtx);
+        if (count > 0) this.store.setSelected(inCtx[hi], false);
     }
 
     contractBottom() {
-        const { lo, count } = this.store.getSelectionBoundsIdx();
-        if (count > 0) this.store.setSelected(lo, false);
+        const inCtx = this._ctxFrames();
+        const { lo, count } = this._ctxSelectionBounds(inCtx);
+        if (count > 0) this.store.setSelected(inCtx[lo], false);
     }
 
     // ── Single-key actions ──────────────────────────────────
@@ -1723,11 +1748,18 @@ class FrameSelectionContext {
         if (!text || text.trim().length === 0) return;
 
         text = text.trim();
-        this.store.deselectAll();
 
-        const targetIds = new Set();
+        // Build ordered list of frame array-indices in current context (matches layers pane order)
+        const ctxId = currentContextId();
+        const inCtx = [];
+        for (let i = 0; i < this.store.count; i++) {
+            const meta = this.store.metadata[i];
+            if (meta && meta.parentId === ctxId) inCtx.push(i);
+        }
+
+        // Parse target local indices (0-based, matching f0/f1/f2 in layers pane)
+        const targetPositions = new Set();
         const parts = text.split(',').map(p => p.trim()).filter(p => p.length > 0);
-
         for (const part of parts) {
             if (part.includes(':')) {
                 const [startStr, endStr] = part.split(':');
@@ -1736,20 +1768,18 @@ class FrameSelectionContext {
                 if (!isNaN(start) && !isNaN(end)) {
                     const lo = Math.min(start, end);
                     const hi = Math.max(start, end);
-                    for (let id = lo; id <= hi; id++) targetIds.add(id);
+                    for (let p = lo; p <= hi; p++) targetPositions.add(p);
                 }
             } else {
-                const id = parseInt(part);
-                if (!isNaN(id)) targetIds.add(id);
+                const p = parseInt(part);
+                if (!isNaN(p)) targetPositions.add(p);
             }
         }
 
-        const ctxId = currentContextId();
-        for (let i = 0; i < this.store.count; i++) {
-            const meta = this.store.metadata[i];
-            if (meta && meta.parentId !== ctxId) continue; // only current context
-            if (targetIds.has(this.store.getFrameId(i))) {
-                this.store.setSelected(i, true);
+        this.store.deselectAll();
+        for (const pos of targetPositions) {
+            if (pos >= 0 && pos < inCtx.length) {
+                this.store.setSelected(inCtx[pos], true);
             }
         }
     }
