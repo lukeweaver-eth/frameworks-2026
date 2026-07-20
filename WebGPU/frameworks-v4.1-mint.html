@@ -2924,19 +2924,20 @@ class CommandExecutor {
     createSuperframe() {
         const store = this.store;
         const cam = this.camera;
+        const ctxId = currentContextId();
 
-        // Collect selected indices in current context
+        // Collect selected frames in current context
         const selectedIndices = [];
         for (let i = 0; i < store.count; i++) {
             const meta = store.metadata[i];
-            if ((store.u32[store._o(i) + U.FLAGS] & FLAG_SELECTED) &&
-                meta && meta.parentId === currentContextId()) {
+            if (meta && meta.parentId === ctxId &&
+                (store.u32[store._o(i) + U.FLAGS] & FLAG_SELECTED)) {
                 selectedIndices.push(i);
             }
         }
 
-        // Determine superframe position: centroid of selected, or cursor
-        let sfx, sfy, sfz;
+        // SF position = centroid of selected (in current context's local space), or cursor
+        let sfx = this.cursor.x, sfy = this.cursor.y, sfz = this.cursor.z;
         if (selectedIndices.length > 0) {
             sfx = 0; sfy = 0; sfz = 0;
             for (const idx of selectedIndices) {
@@ -2948,34 +2949,27 @@ class CommandExecutor {
             sfx /= selectedIndices.length;
             sfy /= selectedIndices.length;
             sfz /= selectedIndices.length;
-        } else {
-            sfx = this.cursor.x;
-            sfy = this.cursor.y;
-            sfz = this.cursor.z;
         }
 
-        // Save current camera state to the current context entry
-        const curEntry = contextStack[contextStack.length - 1];
-        curEntry.savedCamera = {
+        // Save current camera
+        contextStack[contextStack.length - 1].savedCamera = {
             theta: cam.theta, phi: cam.phi, dist: cam.dist,
-            fov: this.cameraContext.fov,
-            target: [...cam.target],
+            fov: this.cameraContext.fov, target: [...cam.target],
         };
 
-        // Create the superframe itself (at world position, no parent override needed —
-        // it belongs to the current context, so parentId = currentContextId())
+        // Create the superframe — addFrame sets parentId:null, we fix it immediately after
         store.deselectAll();
         const sfIdx = store.addFrame(sfx, sfy, sfz, 0, 0, 1, 32.0, this.palette.getNextColor());
         const sfMeta = store.metadata[sfIdx];
-        sfMeta.parentId = currentContextId();
+        sfMeta.parentId = ctxId;           // belongs to the current context
         sfMeta.isSuperframe = true;
-        sfMeta.localCamera = { theta: Math.PI / 4, phi: Math.PI / 6, dist: 30, fov: Math.PI / 3, target: [0, 0, 0] };
+        sfMeta.localCamera = { theta: Math.PI/4, phi: Math.PI/6, dist: 30, fov: Math.PI/3, target: [0,0,0] };
+        store._markDirty(sfIdx);
 
         const sfFrameId = store.u32[store._o(sfIdx) + U.FRAME_ID];
 
-        // Reparent selected frames into the new superframe.
-        // Convert their world positions to superframe-local space (inverse of identity basis at sfx,sfy,sfz).
-        // Since the new superframe has identity basis, local = world - sfPos.
+        // Reparent selected frames: convert positions from current-local to SF-local.
+        // SF has identity basis, so SF-local = current-local - sfPos.
         for (const idx of selectedIndices) {
             const o = store._o(idx);
             store.f32[o + F.PX] -= sfx;
@@ -2985,17 +2979,14 @@ class CommandExecutor {
             store._markDirty(idx);
         }
 
-        // Push new context
+        // Enter the new superframe context
         contextStack.push({ frameId: sfFrameId, savedCamera: null });
 
-        // Restore superframe's local camera
-        const lc = sfMeta.localCamera;
-        cam.theta = lc.theta; cam.phi = lc.phi; cam.dist = lc.dist;
-        cam.target = [...lc.target];
-        cam.invalidate();
-        this.cameraContext.fov = lc.fov;
+        // Restore SF's default local camera
+        cam.theta = Math.PI/4; cam.phi = Math.PI/6; cam.dist = 30;
+        cam.target = [0, 0, 0]; cam.invalidate();
+        this.cameraContext.fov = Math.PI/3;
 
-        // Reset cursor to local origin
         this.cursor.x = 0; this.cursor.y = 0; this.cursor.z = 0;
     }
 
@@ -3691,94 +3682,58 @@ function computeWorldTransforms(store, worldData) {
     const wf32 = worldData;
     const wu32 = new Uint32Array(worldData.buffer);
 
-    // Copy all data first (handles u32 fields: colorIdx, flags, frameId)
+    // Copy raw bits (preserves u32 fields: colorIdx, flags, frameId)
     const words = n * FLOATS_PER_INSTANCE;
-    for (let i = 0; i < words; i++) wu32[i] = u32[i];
+    for (let j = 0; j < words; j++) wu32[j] = u32[j];
 
-    // Build frameId -> array index map for parent lookups
+    // Build frameId -> array index map
     const idToIdx = new Map();
     for (let i = 0; i < n; i++) {
         idToIdx.set(u32[i * FLOATS_PER_INSTANCE + U.FRAME_ID], i);
     }
 
-    // Determine which frames are visible in the current context.
-    // At root (contextStack depth 1): frames with parentId===null are "top level",
-    // but we render ALL frames (children included) with world transforms applied.
-    // Inside a superframe: render only frames whose ancestor chain includes the current superframe.
-    const ctxId = currentContextId();
-
-    function getAncestors(idx, out) {
-        out.push(idx);
-        const meta = store.metadata[idx];
-        if (!meta || meta.parentId === null) return;
-        const parentIdx = idToIdx.get(meta.parentId);
-        if (parentIdx !== undefined) getAncestors(parentIdx, out);
-    }
-
-    function isInContext(idx) {
-        if (ctxId === null) return true; // root: show everything
-        const meta = store.metadata[idx];
-        if (!meta) return false;
-        // Walk up parent chain looking for ctxId
-        let cur = idx;
-        while (cur !== undefined) {
-            const m = store.metadata[cur];
-            if (!m) break;
-            if (m.parentId === ctxId) return true; // direct child of current context
-            if (m.parentId === null) break;
-            cur = idToIdx.get(m.parentId);
-        }
-        return false;
-    }
-
-    // For each frame, compute world transform by walking parent chain
-    // Use iterative approach: process frames whose parents are already computed.
-    // Since we may have arbitrary depth, do a simple multi-pass until stable.
-    const worldComputed = new Uint8Array(n); // 0=pending, 1=done
-
-    // First pass: root frames (parentId===null) are already correct from copy above
+    // Compute world transforms bottom-up (iterative multi-pass for arbitrary depth).
+    // Root frames (parentId===null) are already correct — their local IS their world.
+    const done = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
-        if (!store.metadata[i] || store.metadata[i].parentId === null) {
-            worldComputed[i] = 1;
-        }
+        const meta = store.metadata[i];
+        if (!meta || meta.parentId === null) done[i] = 1;
     }
 
-    // Iterative passes for child frames
     let changed = true;
     while (changed) {
         changed = false;
         for (let i = 0; i < n; i++) {
-            if (worldComputed[i]) continue;
+            if (done[i]) continue;
             const meta = store.metadata[i];
-            if (!meta || meta.parentId === null) { worldComputed[i] = 1; continue; }
             const pIdx = idToIdx.get(meta.parentId);
-            if (pIdx === undefined || !worldComputed[pIdx]) continue;
+            if (pIdx === undefined || !done[pIdx]) continue;
 
-            // Parent world transform is ready — compute this frame's world transform
             const po = pIdx * FLOATS_PER_INSTANCE;
-            const co = i * FLOATS_PER_INSTANCE;
+            const co = i    * FLOATS_PER_INSTANCE;
 
-            // Parent world basis columns
-            const prx = wf32[po+F.RX], pry = wf32[po+F.RY], prz = wf32[po+F.RZ];
-            const pux = wf32[po+F.UX], puy = wf32[po+F.UY], puz = wf32[po+F.UZ];
-            const pnx = wf32[po+F.NX], pny = wf32[po+F.NY], pnz = wf32[po+F.NZ];
-            const ppx = wf32[po+F.PX], ppy = wf32[po+F.PY], ppz = wf32[po+F.PZ];
+            // Parent world basis (column vectors: right, up, normal)
+            const prx = wf32[po+F.RX], pry = wf32[po+F.RY], prz = wf32[po+F.RZ]; // right col
+            const pux = wf32[po+F.UX], puy = wf32[po+F.UY], puz = wf32[po+F.UZ]; // up col
+            const pnx = wf32[po+F.NX], pny = wf32[po+F.NY], pnz = wf32[po+F.NZ]; // normal col
+            const ppx = wf32[po+F.PX], ppy = wf32[po+F.PY], ppz = wf32[po+F.PZ]; // parent world pos
 
-            // Child local position and basis
+            // Child local vectors (read from source, not world buffer)
             const clx = f32[co+F.PX], cly = f32[co+F.PY], clz = f32[co+F.PZ];
-            const crrx = f32[co+F.RX], crry = f32[co+F.RY], crrz = f32[co+F.RZ];
+            const crx = f32[co+F.RX], cry = f32[co+F.RY], crz = f32[co+F.RZ];
             const cux = f32[co+F.UX], cuy = f32[co+F.UY], cuz = f32[co+F.UZ];
             const cnx = f32[co+F.NX], cny = f32[co+F.NY], cnz = f32[co+F.NZ];
 
-            // World position = parent_basis * child_local_pos + parent_world_pos
+            // World pos = parent_basis_matrix * local_pos + parent_world_pos
+            // Matrix cols are right/up/normal, so row 0 of matrix is (prx, pux, pnx), etc.
             wf32[co+F.PX] = prx*clx + pux*cly + pnx*clz + ppx;
             wf32[co+F.PY] = pry*clx + puy*cly + pny*clz + ppy;
             wf32[co+F.PZ] = prz*clx + puz*cly + pnz*clz + ppz;
 
             // World basis = parent_basis * child_local_basis
-            wf32[co+F.RX] = prx*crrx + pux*crry + pnx*crrz;
-            wf32[co+F.RY] = pry*crrx + puy*crry + pny*crrz;
-            wf32[co+F.RZ] = prz*crrx + puz*crry + pnz*crrz;
+            wf32[co+F.RX] = prx*crx + pux*cry + pnx*crz;
+            wf32[co+F.RY] = pry*crx + puy*cry + pny*crz;
+            wf32[co+F.RZ] = prz*crx + puz*cry + pnz*crz;
 
             wf32[co+F.UX] = prx*cux + pux*cuy + pnx*cuz;
             wf32[co+F.UY] = pry*cux + puy*cuy + pny*cuz;
@@ -3788,20 +3743,32 @@ function computeWorldTransforms(store, worldData) {
             wf32[co+F.NY] = pry*cnx + puy*cny + pny*cnz;
             wf32[co+F.NZ] = prz*cnx + puz*cny + pnz*cnz;
 
-            worldComputed[i] = 1;
+            done[i] = 1;
             changed = true;
         }
     }
 
-    // Apply context filter: hide frames not in current context subtree by zeroing scale.
-    // Always show the superframe that IS the current context (the container you're inside).
+    // Context visibility filter.
+    // At root (ctxId===null): show everything.
+    // Inside superframe ctxId: show only direct children of ctxId,
+    // their descendants, AND the container frame itself (so you can see the box you're in).
+    const ctxId = currentContextId();
     if (ctxId !== null) {
         const ctxFrameIdx = idToIdx.get(ctxId);
         for (let i = 0; i < n; i++) {
-            if (ctxFrameIdx !== undefined && i === ctxFrameIdx) continue; // always show container
-            if (!isInContext(i)) {
-                wf32[i * FLOATS_PER_INSTANCE + F.SCALE] = 0;
+            // Always show the container superframe itself
+            if (ctxFrameIdx !== undefined && i === ctxFrameIdx) continue;
+            // Show any frame whose ancestor chain passes through ctxId
+            let visible = false;
+            let cur = i;
+            while (cur !== undefined) {
+                const m = store.metadata[cur];
+                if (!m) break;
+                if (m.parentId === ctxId) { visible = true; break; }
+                if (m.parentId === null) break;
+                cur = idToIdx.get(m.parentId);
             }
+            if (!visible) wf32[i * FLOATS_PER_INSTANCE + F.SCALE] = 0;
         }
     }
 }
