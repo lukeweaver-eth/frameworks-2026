@@ -487,7 +487,7 @@ class FrameStore {
         this.u32[o + U.FLAGS] = FLAG_SELECTED | FLAG_VISIBLE;
         this.u32[o + U.FRAME_ID] = this._frameIdCounter++;
 
-        this.metadata[i] = { called: '', contents: '', contexts: [], components: [], parentId: null, isSuperframe: false, localCamera: null };
+        this.metadata[i] = { called: '', contents: '', contexts: [], components: [] };
         this._markDirty(i);
         return i;
     }
@@ -513,7 +513,7 @@ class FrameStore {
             this.u32[o + U.COLOR_INDEX] = colorFn ? colorFn(i) : (i % 80);
             this.u32[o + U.FLAGS] = FLAG_VISIBLE;
             this.u32[o + U.FRAME_ID] = this._frameIdCounter++;
-            this.metadata[idx] = { called: '', contents: '', contexts: [], components: [], parentId: null, isSuperframe: false, localCamera: null };
+            this.metadata[idx] = { called: '', contents: '', contexts: [], components: [] };
         }
         this._markRangeDirty(start, n);
     }
@@ -532,9 +532,8 @@ class FrameStore {
         this._markRangeDirty(0, this.count);
     }
 
-    selectAll(ctxId = undefined) {
+    selectAll() {
         for (let i = 0; i < this.count; i++) {
-            if (ctxId !== undefined && (!this.metadata[i] || this.metadata[i].parentId !== ctxId)) continue;
             this.u32[this._o(i) + U.FLAGS] |= FLAG_SELECTED;
         }
         this._markRangeDirty(0, this.count);
@@ -822,9 +821,8 @@ class FrameStore {
         this._markRangeDirty(lo - 1, hi - lo + 2);
     }
 
-    invertSelection(ctxId = undefined) {
+    invertSelection() {
         for (let i = 0; i < this.count; i++) {
-            if (ctxId !== undefined && (!this.metadata[i] || this.metadata[i].parentId !== ctxId)) continue;
             this.u32[this._o(i) + U.FLAGS] ^= FLAG_SELECTED;
             this._markDirty(i);
         }
@@ -902,9 +900,6 @@ class FrameStore {
                 contents: srcMeta ? srcMeta.contents : '',
                 contexts: [],
                 components: [],
-                parentId: srcMeta ? srcMeta.parentId : null,
-                isSuperframe: false,
-                localCamera: null,
             };
 
             this._markDirty(newIdx);
@@ -1038,10 +1033,9 @@ class FrameStore {
         }
     }
 
-    selectAllOfColor(ctxId = undefined) {
+    selectAllOfColor() {
         let targetColor = null;
         for (let i = 0; i < this.count; i++) {
-            if (ctxId !== undefined && (!this.metadata[i] || this.metadata[i].parentId !== ctxId)) continue;
             if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) {
                 targetColor = this.u32[this._o(i) + U.COLOR_INDEX];
                 break;
@@ -1050,7 +1044,6 @@ class FrameStore {
         if (targetColor === null) return;
 
         for (let i = 0; i < this.count; i++) {
-            if (ctxId !== undefined && (!this.metadata[i] || this.metadata[i].parentId !== ctxId)) continue;
             if (this.u32[this._o(i) + U.COLOR_INDEX] === targetColor) {
                 this.u32[this._o(i) + U.FLAGS] |= FLAG_SELECTED;
             }
@@ -1530,15 +1523,15 @@ class FrameSelectionContext {
     // ── Single-key actions ──────────────────────────────────
 
     selectByColor() {
-        this.store.selectAllOfColor(currentContextId());
+        this.store.selectAllOfColor();
     }
 
     selectAll() {
-        this.store.selectAll(currentContextId());
+        this.store.selectAll();
     }
 
     invertSelection() {
-        this.store.invertSelection(currentContextId());
+        this.store.invertSelection();
     }
 
     // ── Bracket input ───────────────────────────────────────
@@ -1583,10 +1576,7 @@ class FrameSelectionContext {
             }
         }
 
-        const ctxId = currentContextId();
         for (let i = 0; i < this.store.count; i++) {
-            const meta = this.store.metadata[i];
-            if (meta && meta.parentId !== ctxId) continue; // only current context
             if (targetIds.has(this.store.getFrameId(i))) {
                 this.store.setSelected(i, true);
             }
@@ -1902,14 +1892,6 @@ class CommandExecutor {
                 this.handleCameraContextNavigation(key, false);
             } else if (this.selectionContext.active) {
                 this.handleSelectionContextNavigation(key, false);
-            } else if (key === 'c' && i + 1 < expanded.length) {
-                // Two-char context nav: ci/ck/cj/cl
-                i++;
-                const nav = expanded[i];
-                if (nav === 'i') this.contextUp();
-                else if (nav === 'k') this.contextDown();
-                else if (nav === 'j') this.contextCycleBack();
-                else if (nav === 'l') this.contextCycleForward();
             } else {
                 this.executeKeyNormal(key);
             }
@@ -2006,22 +1988,10 @@ class CommandExecutor {
             if (key === 'j') { this.animationInterval = Math.min(2000, this.animationInterval + 50); this.commandTree.addCommand(key); return; }
             if (key === 'm') { this.animationActive = false; this.mode = 'normal'; this.commandTree.addCommand(key); return; }
             this.mode = 'normal';
-        } else if (this.mode === 'contextNav') {
-            this.mode = 'normal';
-            if (key === 'i') { this.contextUp(); this.commandTree.addCommand('ci'); return; }
-            if (key === 'k') { this.contextDown(); this.commandTree.addCommand('ck'); return; }
-            if (key === 'j') { this.contextCycleBack(); this.commandTree.addCommand('cj'); return; }
-            if (key === 'l') { this.contextCycleForward(); this.commandTree.addCommand('cl'); return; }
-            // Non-ijkl after c: fall through to normal mode with the new key
         }
 
         // Normal mode commands
         switch (key) {
-            case 'F':
-                this.createSuperframe();
-                this.commandTree.addCommand(key);
-                break;
-
             case 'f':
                 this.createFrame();
                 this.commandTree.addCommand(key);
@@ -2088,7 +2058,7 @@ class CommandExecutor {
                 this.commandTree.addCommand(key);
                 break;
             case 'A':
-                this.store.selectAll(currentContextId());
+                this.store.selectAll();
                 this.commandTree.addCommand(key);
                 break;
 
@@ -2140,11 +2110,6 @@ class CommandExecutor {
             case 'Q':
                 this.cycleCornerStructure();
                 this.commandTree.addCommand(key);
-                break;
-
-            case 'c':
-                this.mode = 'contextNav';
-                // No commandTree.addCommand yet — wait for the second key
                 break;
 
             case 'v':
@@ -2380,7 +2345,6 @@ class CommandExecutor {
         }
 
         switch (key) {
-            case 'F': this.createSuperframe(); break;
             case 'f': this.createFrame(); break;
             case 'd': case 'D': this.duplicateSelected(); break;
             case 'x': this.deleteSelected(); break;
@@ -2399,7 +2363,7 @@ class CommandExecutor {
             case 'w': /* handled by replay loop inline */ break;
             case 'W': /* handled by replay loop inline */ break;
             case 'a': this.selectAllOfColor(); break;
-            case 'A': this.store.selectAll(currentContextId()); break;
+            case 'A': this.store.selectAll(); break;
             case 'C': { const ctr = this.store.getSelectionCenter(); if (ctr) { this.cursor.x = ctr.x; this.cursor.y = ctr.y; this.cursor.z = ctr.z; } break; }
             case 'z': this.cursor.x = 0; this.cursor.y = 0; this.cursor.z = 0; break;
             case 'Z': this.centerStructureToCursor(); break;
@@ -2576,14 +2540,12 @@ class CommandExecutor {
         }
 
         this.store.deselectAll();
-        const newIdx = this.store.addFrame(
+        this.store.addFrame(
             this.cursor.x, this.cursor.y, this.cursor.z,
             nx, ny, nz,
             2.0,
             colorIndex
         );
-        // Assign to current context
-        this.store.metadata[newIdx].parentId = currentContextId();
     }
 
     duplicateSelected() {
@@ -2637,200 +2599,7 @@ class CommandExecutor {
     }
 
     selectAllOfColor() {
-        this.store.selectAllOfColor(currentContextId());
-    }
-
-    createSuperframe() {
-        const store = this.store;
-        const cam = this.camera;
-
-        // Collect selected indices in current context
-        const selectedIndices = [];
-        for (let i = 0; i < store.count; i++) {
-            const meta = store.metadata[i];
-            if ((store.u32[store._o(i) + U.FLAGS] & FLAG_SELECTED) &&
-                meta && meta.parentId === currentContextId()) {
-                selectedIndices.push(i);
-            }
-        }
-
-        // Determine superframe position: centroid of selected, or cursor
-        let sfx, sfy, sfz;
-        if (selectedIndices.length > 0) {
-            sfx = 0; sfy = 0; sfz = 0;
-            for (const idx of selectedIndices) {
-                const o = store._o(idx);
-                sfx += store.f32[o + F.PX];
-                sfy += store.f32[o + F.PY];
-                sfz += store.f32[o + F.PZ];
-            }
-            sfx /= selectedIndices.length;
-            sfy /= selectedIndices.length;
-            sfz /= selectedIndices.length;
-        } else {
-            sfx = this.cursor.x;
-            sfy = this.cursor.y;
-            sfz = this.cursor.z;
-        }
-
-        // Save current camera state to the current context entry
-        const curEntry = contextStack[contextStack.length - 1];
-        curEntry.savedCamera = {
-            theta: cam.theta, phi: cam.phi, dist: cam.dist,
-            fov: this.cameraContext.fov,
-            target: [...cam.target],
-        };
-
-        // Create the superframe itself (at world position, no parent override needed —
-        // it belongs to the current context, so parentId = currentContextId())
-        store.deselectAll();
-        const sfIdx = store.addFrame(sfx, sfy, sfz, 0, 0, 1, 32.0, this.palette.getNextColor());
-        const sfMeta = store.metadata[sfIdx];
-        sfMeta.parentId = currentContextId();
-        sfMeta.isSuperframe = true;
-        sfMeta.localCamera = { theta: Math.PI / 4, phi: Math.PI / 6, dist: 30, fov: Math.PI / 3, target: [0, 0, 0] };
-
-        const sfFrameId = store.u32[store._o(sfIdx) + U.FRAME_ID];
-
-        // Reparent selected frames into the new superframe.
-        // Convert their world positions to superframe-local space (inverse of identity basis at sfx,sfy,sfz).
-        // Since the new superframe has identity basis, local = world - sfPos.
-        for (const idx of selectedIndices) {
-            const o = store._o(idx);
-            store.f32[o + F.PX] -= sfx;
-            store.f32[o + F.PY] -= sfy;
-            store.f32[o + F.PZ] -= sfz;
-            store.metadata[idx].parentId = sfFrameId;
-            store._markDirty(idx);
-        }
-
-        // Push new context
-        contextStack.push({ frameId: sfFrameId, savedCamera: null });
-
-        // Restore superframe's local camera
-        const lc = sfMeta.localCamera;
-        cam.theta = lc.theta; cam.phi = lc.phi; cam.dist = lc.dist;
-        cam.target = [...lc.target];
-        cam.invalidate();
-        this.cameraContext.fov = lc.fov;
-
-        // Reset cursor to local origin
-        this.cursor.x = 0; this.cursor.y = 0; this.cursor.z = 0;
-    }
-
-    // ci — move up to parent context
-    contextUp() {
-        if (contextStack.length <= 1) return; // already at root
-        const leaving = contextStack.pop();
-
-        // Save current camera into the superframe we're leaving
-        const sfIdx = this._findByFrameId(leaving.frameId);
-        if (sfIdx !== -1) {
-            this.store.metadata[sfIdx].localCamera = {
-                theta: this.camera.theta, phi: this.camera.phi,
-                dist: this.camera.dist, fov: this.cameraContext.fov,
-                target: [...this.camera.target],
-            };
-        }
-
-        // Restore parent camera
-        const parentEntry = contextStack[contextStack.length - 1];
-        if (parentEntry.savedCamera) {
-            const lc = parentEntry.savedCamera;
-            this.camera.theta = lc.theta; this.camera.phi = lc.phi;
-            this.camera.dist = lc.dist; this.camera.target = [...lc.target];
-            this.camera.invalidate();
-            this.cameraContext.fov = lc.fov;
-        }
-
-        // Select the superframe we just exited
-        this.store.deselectAll();
-        if (sfIdx !== -1) {
-            this.store.setSelected(sfIdx, true);
-        }
-
-        this.cursor.x = 0; this.cursor.y = 0; this.cursor.z = 0;
-    }
-
-    // ck — enter selected superframe
-    contextDown() {
-        // Find a single selected superframe in the current context
-        let sfIdx = -1;
-        for (let i = 0; i < this.store.count; i++) {
-            const meta = this.store.metadata[i];
-            if (!meta || !meta.isSuperframe) continue;
-            if (meta.parentId !== currentContextId()) continue;
-            if (!(this.store.u32[this.store._o(i) + U.FLAGS] & FLAG_SELECTED)) continue;
-            sfIdx = i;
-            break;
-        }
-        if (sfIdx === -1) return;
-
-        const sfFrameId = this.store.u32[this.store._o(sfIdx) + U.FRAME_ID];
-
-        // Save current camera to the current context entry
-        const curEntry = contextStack[contextStack.length - 1];
-        curEntry.savedCamera = {
-            theta: this.camera.theta, phi: this.camera.phi,
-            dist: this.camera.dist, fov: this.cameraContext.fov,
-            target: [...this.camera.target],
-        };
-
-        // Push new context
-        contextStack.push({ frameId: sfFrameId, savedCamera: null });
-
-        // Restore superframe's local camera
-        const lc = this.store.metadata[sfIdx].localCamera || { theta: Math.PI/4, phi: Math.PI/6, dist: 30, fov: Math.PI/3, target: [0,0,0] };
-        this.camera.theta = lc.theta; this.camera.phi = lc.phi;
-        this.camera.dist = lc.dist; this.camera.target = [...lc.target];
-        this.camera.invalidate();
-        this.cameraContext.fov = lc.fov;
-
-        this.store.deselectAll();
-        this.cursor.x = 0; this.cursor.y = 0; this.cursor.z = 0;
-    }
-
-    // cj — cycle selection backward through frames in current context
-    contextCycleBack() {
-        this._contextCycle(-1);
-    }
-
-    // cl — cycle selection forward through frames in current context
-    contextCycleForward() {
-        this._contextCycle(1);
-    }
-
-    _contextCycle(dir) {
-        const ctxId = currentContextId();
-        // Collect indices of frames in current context
-        const inCtx = [];
-        for (let i = 0; i < this.store.count; i++) {
-            const meta = this.store.metadata[i];
-            if (meta && meta.parentId === ctxId) inCtx.push(i);
-        }
-        if (inCtx.length === 0) return;
-
-        // Find currently selected frame in context
-        let curPos = -1;
-        for (let j = 0; j < inCtx.length; j++) {
-            if (this.store.u32[this.store._o(inCtx[j]) + U.FLAGS] & FLAG_SELECTED) {
-                curPos = j; break;
-            }
-        }
-
-        const nextPos = curPos === -1
-            ? (dir > 0 ? 0 : inCtx.length - 1)
-            : (curPos + dir + inCtx.length) % inCtx.length;
-
-        this.store.deselectAll();
-        this.store.setSelected(inCtx[nextPos], true);
-    }
-
-    _findByFrameId(frameId) {
-        for (let i = 0; i < this.store.count; i++) {
-            if (this.store.u32[this.store._o(i) + U.FRAME_ID] === frameId) return i;
-        }
-        return -1;
+        this.store.selectAllOfColor();
     }
 
     snapSelectionToCursor() {
@@ -3002,9 +2771,6 @@ class CommandExecutor {
         if (this.cameraContext.active)      this.cameraContext.exit();
         if (this.selectionContext.active)   this.selectionContext.exit();
         if (this.paletteEditContext.active) this.paletteEditContext.exit();
-        // Reset context stack to root
-        contextStack.length = 0;
-        contextStack.push({ frameId: null });
         const cam = this.camera;
         cam.theta = Math.PI / 4; cam.phi = Math.PI / 6; cam.dist = 30;
         cam.target = [0, 0, 0];
@@ -3384,147 +3150,6 @@ class Camera {
 }
 
 // ============================================================
-// CONTEXT STACK
-// Each entry: { frameId: null|number, camera: snapshot }
-// frameId null = root context (all root-level frames)
-// ============================================================
-const contextStack = [{ frameId: null }];
-function currentContextId() { return contextStack[contextStack.length - 1].frameId; }
-
-// ============================================================
-// WORLD TRANSFORM PASS
-// Computes world-space position/basis for every frame by
-// walking the parentId chain. Root frames are unchanged.
-// Children: world_pos = parent_basis * local_pos + parent_world_pos
-//           world_basis = parent_basis * local_basis
-// Frames outside the current context subtree are hidden (scale=0).
-// Result is written into worldData (Float32Array, same layout as store.data).
-// ============================================================
-function computeWorldTransforms(store, worldData) {
-    const n = store.count;
-    if (n === 0) return;
-
-    const f32 = store.f32;
-    const u32 = store.u32;
-    const wf32 = worldData;
-    const wu32 = new Uint32Array(worldData.buffer);
-
-    // Copy all data first (handles u32 fields: colorIdx, flags, frameId)
-    const words = n * FLOATS_PER_INSTANCE;
-    for (let i = 0; i < words; i++) wu32[i] = u32[i];
-
-    // Build frameId -> array index map for parent lookups
-    const idToIdx = new Map();
-    for (let i = 0; i < n; i++) {
-        idToIdx.set(u32[i * FLOATS_PER_INSTANCE + U.FRAME_ID], i);
-    }
-
-    // Determine which frames are visible in the current context.
-    // At root (contextStack depth 1): frames with parentId===null are "top level",
-    // but we render ALL frames (children included) with world transforms applied.
-    // Inside a superframe: render only frames whose ancestor chain includes the current superframe.
-    const ctxId = currentContextId();
-
-    function getAncestors(idx, out) {
-        out.push(idx);
-        const meta = store.metadata[idx];
-        if (!meta || meta.parentId === null) return;
-        const parentIdx = idToIdx.get(meta.parentId);
-        if (parentIdx !== undefined) getAncestors(parentIdx, out);
-    }
-
-    function isInContext(idx) {
-        if (ctxId === null) return true; // root: show everything
-        const meta = store.metadata[idx];
-        if (!meta) return false;
-        // Walk up parent chain looking for ctxId
-        let cur = idx;
-        while (cur !== undefined) {
-            const m = store.metadata[cur];
-            if (!m) break;
-            if (m.parentId === ctxId) return true; // direct child of current context
-            if (m.parentId === null) break;
-            cur = idToIdx.get(m.parentId);
-        }
-        return false;
-    }
-
-    // For each frame, compute world transform by walking parent chain
-    // Use iterative approach: process frames whose parents are already computed.
-    // Since we may have arbitrary depth, do a simple multi-pass until stable.
-    const worldComputed = new Uint8Array(n); // 0=pending, 1=done
-
-    // First pass: root frames (parentId===null) are already correct from copy above
-    for (let i = 0; i < n; i++) {
-        if (!store.metadata[i] || store.metadata[i].parentId === null) {
-            worldComputed[i] = 1;
-        }
-    }
-
-    // Iterative passes for child frames
-    let changed = true;
-    while (changed) {
-        changed = false;
-        for (let i = 0; i < n; i++) {
-            if (worldComputed[i]) continue;
-            const meta = store.metadata[i];
-            if (!meta || meta.parentId === null) { worldComputed[i] = 1; continue; }
-            const pIdx = idToIdx.get(meta.parentId);
-            if (pIdx === undefined || !worldComputed[pIdx]) continue;
-
-            // Parent world transform is ready — compute this frame's world transform
-            const po = pIdx * FLOATS_PER_INSTANCE;
-            const co = i * FLOATS_PER_INSTANCE;
-
-            // Parent world basis columns
-            const prx = wf32[po+F.RX], pry = wf32[po+F.RY], prz = wf32[po+F.RZ];
-            const pux = wf32[po+F.UX], puy = wf32[po+F.UY], puz = wf32[po+F.UZ];
-            const pnx = wf32[po+F.NX], pny = wf32[po+F.NY], pnz = wf32[po+F.NZ];
-            const ppx = wf32[po+F.PX], ppy = wf32[po+F.PY], ppz = wf32[po+F.PZ];
-
-            // Child local position and basis
-            const clx = f32[co+F.PX], cly = f32[co+F.PY], clz = f32[co+F.PZ];
-            const crrx = f32[co+F.RX], crry = f32[co+F.RY], crrz = f32[co+F.RZ];
-            const cux = f32[co+F.UX], cuy = f32[co+F.UY], cuz = f32[co+F.UZ];
-            const cnx = f32[co+F.NX], cny = f32[co+F.NY], cnz = f32[co+F.NZ];
-
-            // World position = parent_basis * child_local_pos + parent_world_pos
-            wf32[co+F.PX] = prx*clx + pux*cly + pnx*clz + ppx;
-            wf32[co+F.PY] = pry*clx + puy*cly + pny*clz + ppy;
-            wf32[co+F.PZ] = prz*clx + puz*cly + pnz*clz + ppz;
-
-            // World basis = parent_basis * child_local_basis
-            wf32[co+F.RX] = prx*crrx + pux*crry + pnx*crrz;
-            wf32[co+F.RY] = pry*crrx + puy*crry + pny*crrz;
-            wf32[co+F.RZ] = prz*crrx + puz*crry + pnz*crrz;
-
-            wf32[co+F.UX] = prx*cux + pux*cuy + pnx*cuz;
-            wf32[co+F.UY] = pry*cux + puy*cuy + pny*cuz;
-            wf32[co+F.UZ] = prz*cux + puz*cuy + pnz*cuz;
-
-            wf32[co+F.NX] = prx*cnx + pux*cny + pnx*cnz;
-            wf32[co+F.NY] = pry*cnx + puy*cny + pny*cnz;
-            wf32[co+F.NZ] = prz*cnx + puz*cny + pnz*cnz;
-
-            worldComputed[i] = 1;
-            changed = true;
-        }
-    }
-
-    // Apply context filter: hide frames not in current context subtree by zeroing scale.
-    // Always show the superframe that IS the current context (the container you're inside).
-    if (ctxId !== null) {
-        const ctxFrameIdx = idToIdx.get(ctxId);
-        for (let i = 0; i < n; i++) {
-            if (ctxFrameIdx !== undefined && i === ctxFrameIdx) continue; // always show container
-            if (!isInContext(i)) {
-                wf32[i * FLOATS_PER_INSTANCE + F.SCALE] = 0;
-            }
-        }
-    }
-}
-
-// ============================================================
 // WEBGPU INIT + COMMAND STRING LOADER
 // ============================================================
 async function main() {
@@ -3568,9 +3193,6 @@ async function main() {
   const maxBytes = MAX_INSTANCES * BYTES_PER_INSTANCE;
 
   const instanceBuf = device.createBuffer({ size: maxBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-  // worldBuf holds world-space transforms computed from local coords + parent chain.
-  // Render/cull pipelines read from worldBuf; instanceBuf stays as source-of-truth local coords.
-  const worldBuf = device.createBuffer({ size: maxBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   const visibleBuf = device.createBuffer({ size: MAX_INSTANCES * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
   const indirectBuf = device.createBuffer({ size: 20, usage: GPUBufferUsage.INDIRECT | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
   const MAX_PALETTE_COLORS = 80;
@@ -3593,7 +3215,7 @@ async function main() {
   const renderBG = device.createBindGroup({ layout: renderBGL, entries: [
     { binding: 0, resource: { buffer: uniformBuf } },
     { binding: 1, resource: { buffer: visibleBuf } },
-    { binding: 2, resource: { buffer: worldBuf } },
+    { binding: 2, resource: { buffer: instanceBuf } },
     { binding: 3, resource: { buffer: paletteBuf } },
   ]});
 
@@ -3629,7 +3251,7 @@ async function main() {
 
   const cullBG = device.createBindGroup({ layout: cullBGL, entries: [
     { binding: 0, resource: { buffer: cullUniformBuf } },
-    { binding: 1, resource: { buffer: worldBuf } },
+    { binding: 1, resource: { buffer: instanceBuf } },
     { binding: 2, resource: { buffer: visibleBuf } },
     { binding: 3, resource: { buffer: indirectBuf } },
   ]});
@@ -3999,8 +3621,8 @@ async function main() {
     executor.executeKey(e.key, e.shiftKey);
     // Append to sketch log for meaningful keys only
     const SKETCH_KEYS = new Set([
-      'F','f','d','D','x','t','T','s','S','r','R','e','E','h','H',
-      'q','Q','a','A','c','C','z','Z',' ','m','p','P','v','#',
+      'f','d','D','x','t','T','s','S','r','R','e','E','h','H',
+      'q','Q','a','A','C','z','Z',' ','m','p','P','v','#',
       'i','j','k','l','I','J','K','L',
       '0','1','2','3','4','5','6',
     ]);
@@ -4036,17 +3658,8 @@ async function main() {
 
     const dirty = store.getDirtyRange();
     if (dirty && n > 0) {
-      // Keep instanceBuf in sync (local coords, source of truth)
       device.queue.writeBuffer(instanceBuf, dirty.offset, store.data, dirty.offset, dirty.length);
       store.clearDirty();
-    }
-
-    // Compute world-space transforms and upload to worldBuf every frame.
-    // This is cheap for typical scene sizes and handles parent moves for free.
-    if (n > 0) {
-      const worldData = new Float32Array(n * FLOATS_PER_INSTANCE);
-      computeWorldTransforms(store, worldData);
-      device.queue.writeBuffer(worldBuf, 0, worldData.buffer, 0, n * BYTES_PER_INSTANCE);
     }
 
     const aspect = canvas.width / canvas.height;
