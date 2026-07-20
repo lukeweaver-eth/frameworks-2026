@@ -2684,7 +2684,7 @@ class CommandExecutor {
         // Create the superframe itself (at world position, no parent override needed —
         // it belongs to the current context, so parentId = currentContextId())
         store.deselectAll();
-        const sfIdx = store.addFrame(sfx, sfy, sfz, 0, 0, 1, 4.0, this.palette.getNextColor());
+        const sfIdx = store.addFrame(sfx, sfy, sfz, 0, 0, 1, 32.0, this.palette.getNextColor());
         const sfMeta = store.metadata[sfIdx];
         sfMeta.parentId = currentContextId();
         sfMeta.isSuperframe = true;
@@ -3511,9 +3511,12 @@ function computeWorldTransforms(store, worldData) {
         }
     }
 
-    // Apply context filter: hide frames not in current context subtree by zeroing scale
+    // Apply context filter: hide frames not in current context subtree by zeroing scale.
+    // Always show the superframe that IS the current context (the container you're inside).
     if (ctxId !== null) {
+        const ctxFrameIdx = idToIdx.get(ctxId);
         for (let i = 0; i < n; i++) {
+            if (ctxFrameIdx !== undefined && i === ctxFrameIdx) continue; // always show container
             if (!isInContext(i)) {
                 wf32[i * FLOATS_PER_INSTANCE + F.SCALE] = 0;
             }
