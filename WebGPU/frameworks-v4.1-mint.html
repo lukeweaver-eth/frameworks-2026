@@ -171,8 +171,6 @@ canvas { display: block; width: 100vw; height: 100vh; }
   display: flex; align-items: center; gap: 5px;
 }
 .layer-row.selected { color: #ddd; background: rgba(255,255,255,0.07); }
-.layer-row.superframe { color: #88aadd; }
-.layer-row.superframe.selected { color: #aaccff; background: rgba(100,150,255,0.1); }
 .layer-icon { font-size: 9px; opacity: 0.7; flex-shrink: 0; }
 .layer-name { overflow: hidden; text-overflow: ellipsis; }
 
@@ -2921,9 +2919,10 @@ class CommandExecutor {
         this.store.selectAllOfColor(currentContextId());
     }
 
+    // F = create a frame at current context level (same as f) then immediately enter it (ck).
+    // If frames are selected, wraps them: creates frame at their centroid, reparents them into it, enters it.
     createSuperframe() {
         const store = this.store;
-        const cam = this.camera;
         const ctxId = currentContextId();
 
         // Collect selected frames in current context
@@ -2936,10 +2935,9 @@ class CommandExecutor {
             }
         }
 
-        // SF position = centroid of selected (in current context's local space), or cursor
-        let sfx = this.cursor.x, sfy = this.cursor.y, sfz = this.cursor.z;
         if (selectedIndices.length > 0) {
-            sfx = 0; sfy = 0; sfz = 0;
+            // Wrap: create frame at centroid of selected, reparent selected into it
+            let sfx = 0, sfy = 0, sfz = 0;
             for (const idx of selectedIndices) {
                 const o = store._o(idx);
                 sfx += store.f32[o + F.PX];
@@ -2949,45 +2947,30 @@ class CommandExecutor {
             sfx /= selectedIndices.length;
             sfy /= selectedIndices.length;
             sfz /= selectedIndices.length;
+
+            store.deselectAll();
+            const sfIdx = store.addFrame(sfx, sfy, sfz, 0, 0, 1, 32.0, this.palette.getNextColor());
+            store.metadata[sfIdx].parentId = ctxId;
+            store._markDirty(sfIdx);
+
+            const sfFrameId = store.u32[store._o(sfIdx) + U.FRAME_ID];
+            for (const idx of selectedIndices) {
+                const o = store._o(idx);
+                store.f32[o + F.PX] -= sfx;
+                store.f32[o + F.PY] -= sfy;
+                store.f32[o + F.PZ] -= sfz;
+                store.metadata[idx].parentId = sfFrameId;
+                store._markDirty(idx);
+            }
+            // Select the new frame so contextDown can enter it
+            store.setSelected(sfIdx, true);
+        } else {
+            // No selection: create frame at cursor, it stays selected (addFrame selects it)
+            this.createFrame();
         }
 
-        // Save current camera
-        contextStack[contextStack.length - 1].savedCamera = {
-            theta: cam.theta, phi: cam.phi, dist: cam.dist,
-            fov: this.cameraContext.fov, target: [...cam.target],
-        };
-
-        // Create the superframe — addFrame sets parentId:null, we fix it immediately after
-        store.deselectAll();
-        const sfIdx = store.addFrame(sfx, sfy, sfz, 0, 0, 1, 32.0, this.palette.getNextColor());
-        const sfMeta = store.metadata[sfIdx];
-        sfMeta.parentId = ctxId;           // belongs to the current context
-        sfMeta.isSuperframe = true;
-        sfMeta.localCamera = { theta: Math.PI/4, phi: Math.PI/6, dist: 30, fov: Math.PI/3, target: [0,0,0] };
-        store._markDirty(sfIdx);
-
-        const sfFrameId = store.u32[store._o(sfIdx) + U.FRAME_ID];
-
-        // Reparent selected frames: convert positions from current-local to SF-local.
-        // SF has identity basis, so SF-local = current-local - sfPos.
-        for (const idx of selectedIndices) {
-            const o = store._o(idx);
-            store.f32[o + F.PX] -= sfx;
-            store.f32[o + F.PY] -= sfy;
-            store.f32[o + F.PZ] -= sfz;
-            store.metadata[idx].parentId = sfFrameId;
-            store._markDirty(idx);
-        }
-
-        // Enter the new superframe context
-        contextStack.push({ frameId: sfFrameId, savedCamera: null });
-
-        // Restore SF's default local camera
-        cam.theta = Math.PI/4; cam.phi = Math.PI/6; cam.dist = 30;
-        cam.target = [0, 0, 0]; cam.invalidate();
-        this.cameraContext.fov = Math.PI/3;
-
-        this.cursor.x = 0; this.cursor.y = 0; this.cursor.z = 0;
+        // Enter the newly created (and selected) frame
+        this.contextDown();
     }
 
     // ci — move up to parent context
@@ -3024,14 +3007,12 @@ class CommandExecutor {
         this.cursor.x = 0; this.cursor.y = 0; this.cursor.z = 0;
     }
 
-    // ck — enter selected superframe
+    // ck — enter selected frame (any selected frame in current context can be entered)
     contextDown() {
-        // Find a single selected superframe in the current context
         let sfIdx = -1;
         for (let i = 0; i < this.store.count; i++) {
             const meta = this.store.metadata[i];
-            if (!meta || !meta.isSuperframe) continue;
-            if (meta.parentId !== currentContextId()) continue;
+            if (!meta || meta.parentId !== currentContextId()) continue;
             if (!(this.store.u32[this.store._o(i) + U.FLAGS] & FLAG_SELECTED)) continue;
             sfIdx = i;
             break;
@@ -4548,11 +4529,9 @@ async function main() {
           const meta = store.metadata[i];
           if (!meta || meta.parentId !== ctxId) continue;
           const isSel = !!(store.u32[store._o(i) + U.FLAGS] & FLAG_SELECTED);
-          const isSF = meta.isSuperframe;
-          const icon = isSF ? '▣' : '▪';
-          const name = meta.called || (isSF ? `SF#${store.getFrameId(i)}` : `f${localIdx}`);
-          const cls = ['layer-row', isSF ? 'superframe' : '', isSel ? 'selected' : ''].filter(Boolean).join(' ');
-          listHtml += `<div class="${cls}"><span class="layer-icon">${icon}</span><span class="layer-name">${name}</span></div>`;
+          const name = meta.called || `f${localIdx}`;
+          const cls = 'layer-row' + (isSel ? ' selected' : '');
+          listHtml += `<div class="${cls}"><span class="layer-icon">▪</span><span class="layer-name">${name}</span></div>`;
           localIdx++;
         }
         if (!listHtml) listHtml = '<div style="padding:6px 10px;color:#444;font-size:10px;">(empty)</div>';
