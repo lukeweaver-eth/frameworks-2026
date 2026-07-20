@@ -963,13 +963,38 @@ class FrameStore {
         }
         if (originals.length === 0) return [];
 
+        // Deselect originals
         for (const idx of originals) {
             this.u32[this._o(idx) + U.FLAGS] &= ~FLAG_SELECTED;
             this._markDirty(idx);
         }
 
+        // Deep-duplicate each selected frame and its entire subtree.
+        // oldIdToNewId maps original frameId -> new frameId so children can be reparented.
+        const oldIdToNewId = new Map();
         const newIndices = [];
-        for (const srcIdx of originals) {
+
+        // BFS/queue: start with selected frames, then their descendants
+        const queue = [...originals];
+        const queued = new Set(originals);
+
+        // Expand queue to include all descendants
+        let qi = 0;
+        while (qi < queue.length) {
+            const parentIdx = queue[qi++];
+            const parentId = this.u32[this._o(parentIdx) + U.FRAME_ID];
+            for (let i = 0; i < this.count; i++) {
+                if (queued.has(i)) continue;
+                const meta = this.metadata[i];
+                if (meta && meta.parentId === parentId) {
+                    queue.push(i);
+                    queued.add(i);
+                }
+            }
+        }
+
+        // Duplicate all queued frames in order (parents before children)
+        for (const srcIdx of queue) {
             const newIdx = this.count++;
             this._grow(this.count);
 
@@ -979,32 +1004,67 @@ class FrameStore {
                 this.u32[dst + j] = this.u32[src + j];
             }
 
-            this.u32[dst + U.FRAME_ID] = this._frameIdCounter++;
-            this.u32[dst + U.FLAGS] |= FLAG_SELECTED;
+            const newFrameId = this._frameIdCounter++;
+            this.u32[dst + U.FRAME_ID] = newFrameId;
+            oldIdToNewId.set(this.u32[src + U.FRAME_ID], newFrameId);
+
+            // Only top-level duplicates (the originally selected frames) are selected
+            if (originals.includes(srcIdx)) {
+                this.u32[dst + U.FLAGS] |= FLAG_SELECTED;
+            } else {
+                this.u32[dst + U.FLAGS] &= ~FLAG_SELECTED;
+            }
 
             const srcMeta = this.metadata[srcIdx];
+            // Reparent: if this frame's parent was also duplicated, point to the new parent
+            let newParentId = srcMeta ? srcMeta.parentId : null;
+            if (newParentId !== null && oldIdToNewId.has(newParentId)) {
+                newParentId = oldIdToNewId.get(newParentId);
+            }
+
             this.metadata[newIdx] = {
                 called: srcMeta ? srcMeta.called : '',
                 contents: srcMeta ? srcMeta.contents : '',
                 contexts: [],
                 components: [],
-                parentId: srcMeta ? srcMeta.parentId : null,
-                isSuperframe: false,
-                localCamera: null,
+                parentId: newParentId,
+                isSuperframe: srcMeta ? srcMeta.isSuperframe : false,
+                localCamera: srcMeta && srcMeta.localCamera ? { ...srcMeta.localCamera } : null,
             };
 
             this._markDirty(newIdx);
-            newIndices.push(newIdx);
+            if (originals.includes(srcIdx)) newIndices.push(newIdx);
         }
         return newIndices;
     }
 
     deleteSelected() {
+        // Collect all frameIds to delete: selected + all their descendants
+        const toDelete = new Set();
+        for (let i = 0; i < this.count; i++) {
+            if (this.u32[this._o(i) + U.FLAGS] & FLAG_SELECTED) {
+                toDelete.add(this.u32[this._o(i) + U.FRAME_ID]);
+            }
+        }
+        // Expand to descendants iteratively
+        let expanded = true;
+        while (expanded) {
+            expanded = false;
+            for (let i = 0; i < this.count; i++) {
+                const fid = this.u32[this._o(i) + U.FRAME_ID];
+                if (toDelete.has(fid)) continue;
+                const meta = this.metadata[i];
+                if (meta && meta.parentId !== null && toDelete.has(meta.parentId)) {
+                    toDelete.add(fid);
+                    expanded = true;
+                }
+            }
+        }
+
         let dst = 0;
         for (let src = 0; src < this.count; src++) {
-            if (this.u32[this._o(src) + U.FLAGS] & FLAG_SELECTED) {
-                continue;
-            }
+            const fid = this.u32[this._o(src) + U.FRAME_ID];
+            if (toDelete.has(fid)) continue;
             if (dst !== src) {
                 const so = this._o(src), do_ = this._o(dst);
                 for (let j = 0; j < FLOATS_PER_INSTANCE; j++) {
@@ -2826,7 +2886,7 @@ class CommandExecutor {
         this.cursor.z += dz;
     }
 
-    createFrame() {
+    createFrame(scale = 2.0) {
         const colorIndex = this.palette.getNextColor();
 
         let nx, ny, nz;
@@ -2858,7 +2918,7 @@ class CommandExecutor {
         const newIdx = this.store.addFrame(
             this.cursor.x, this.cursor.y, this.cursor.z,
             nx, ny, nz,
-            2.0,
+            scale,
             colorIndex
         );
         // Assign to current context
@@ -2949,7 +3009,7 @@ class CommandExecutor {
             sfz /= selectedIndices.length;
 
             store.deselectAll();
-            const sfIdx = store.addFrame(sfx, sfy, sfz, 0, 0, 1, 32.0, this.palette.getNextColor());
+            const sfIdx = store.addFrame(sfx, sfy, sfz, 0, 0, 1, 8.0, this.palette.getNextColor());
             store.metadata[sfIdx].parentId = ctxId;
             store._markDirty(sfIdx);
 
@@ -2965,8 +3025,8 @@ class CommandExecutor {
             // Select the new frame so contextDown can enter it
             store.setSelected(sfIdx, true);
         } else {
-            // No selection: create frame at cursor, it stays selected (addFrame selects it)
-            this.createFrame();
+            // No selection: create frame at cursor at 4× f scale
+            this.createFrame(8.0);
         }
 
         // Enter the newly created (and selected) frame
