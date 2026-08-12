@@ -22,7 +22,7 @@ Four stages. Each is independently shippable and leaves a working system.
 | Stage | What it adds | Unblocks |
 |---|---|---|
 | **1. Frames are tokens** | ERC-721 + 6551 | ownership, containment, transfer, display |
-| **2. Citation costs something** | ERC-1155 receipts, per (framework, author) | the whole economic model |
+| **2. Citation costs something** | ERC-1155 receipts, cost per frame | the whole economic model |
 | **3. Frames are visible** | on-chain preview, enumeration | wallets, marketplaces, discovery |
 | **4. Contexts do more than draw** | statechart context | the "systems as structures" claim |
 
@@ -124,110 +124,128 @@ something. Scientific papers cite studies; nobody is buying a licence.
 
 ### The rule
 
-**Cost is per (framework, author).**
+**Cost is per frame. You pay at the level you grab.**
 
 ```
-copying a framework costs:
-    gas to mint the new tokens                        ← the default
-  + cost[author] for each distinct (framework, author)
-    pair present in what you copied
+copying frame X costs:  cost[X]        ← one lookup. that's all.
+                                          you get X and everything inside it.
 ```
 
-- Default cost is **the gas to mint those tokens** — the baseline is "you pay
-  what it costs to exist," not rent. Authors opt into charging by setting
-  `cost`.
-- Two frameworks by the same author = two payments. Same author, different
-  work, different citation.
-- One framework containing three authors' work = three payments, one to each.
-  **Not** a fraction split upstream — separate payments, no dilution.
-- **Once you have paid for a (framework, author) pair, it is yours.** Use it in
-  any composition of yours, any number of times, forever.
+Four rules, and they are the whole model:
 
-The unit is the intersection: what you are citing is *this author's
-contribution to this framework*. If their work appears in two frameworks, that
-is two things to cite — exactly as citing an author's two papers is two
-citations.
+1. **Cost is a property of a frame**, set by its author. Default is the gas to
+   mint the copy — you pay what it costs to exist, not rent.
+2. **You pay for what you grabbed, and get everything it contains.** Copy the
+   top-level framework, pay its cost, receive the whole subtree. Copy one
+   component, pay that component's cost. There is no summing.
+3. **Changing a cost is never retroactive.** A citation already paid is
+   settled. This is what makes prices safe to change: no clawback, no debt
+   appearing behind you.
+4. **Zero is allowed**, and will be common. Many authors want reach over
+   income. At zero the citation still happens, the receipt still mints, the
+   edge is still real — the fee was never what made the link meaningful.
 
-### Receipts belong to the buyer, not the work
+### Why paying at the top level is the right cut
+
+**It makes cost a pricing decision about a bounded thing.** Setting a cost on a
+frame prices "this, and everything it contains." So the boundaries drawn with
+`f`/`F` become price points — wrapping something is deciding it is a unit
+someone can buy.
+
+**Granularity becomes the buyer's choice.** Want the whole framework? Pay the
+top. Want the one component you actually need? Go in and take that, cheaper.
+The author prices each level independently; the reader picks the resolution.
+
+**It is how citation already works.** You cite the paper, or you cite one
+figure from it. Different acts, different weight — and you do not owe the
+author separately for every sentence in the paper you cited.
+
+**And it removes the hardest engineering problem in this stage.** An earlier
+draft charged per author present in the subtree, which required enumerating
+distinct authors across an arbitrary tree — unbounded gas, solved only by
+precomputing author sets at mint. Paying at the level you grab makes all of
+that unnecessary. One frame, one price, one lookup.
+
+### Receipts belong to the buyer, and cover the subtree
 
 ```solidity
-id = keccak256(abi.encode(frameworkContract, frameworkId, author))
+id = keccak256(abi.encode(frameContract, frameId))
 
-cite(frameworkContract, frameworkId) payable
-  1. authors = authorSet(frameworkContract, frameworkId)
-  2. for each (framework, author) pair not already held by msg.sender:
-        require payment of cost[pair]
-        pay author directly
-        mint 1 receipt of `id` to msg.sender
-  3. pairs already held → free
+cite(frameContract, frameId) payable
+  1. if holds(msg.sender, frameId) → free, already cited
+  2. else → require cost[frameId], pay its author directly,
+            mint 1 receipt of `id` to msg.sender
+
+holds(who, frameId)
+  → true if `who` holds a receipt for frameId **or for any ancestor of it**
 ```
 
-Receipts mint to **`msg.sender`'s wallet**, not the citing frame's account.
-This follows directly from "once you've paid you can use your own after that":
-the citation travels with *you*, not with the work.
+Two properties, both load-bearing:
 
-This reverses the layers spec, which mints to the citing frame's TBA so the
-licence travels with the work. That was the right call for licensing and is the
-wrong one here. Consequence to accept: selling a composition transfers no
-citations — a buyer who copies further owes on their own account.
+**Receipts mint to `msg.sender`'s wallet**, not the citing frame's account. The
+citation travels with *you*. This follows directly from "once you've paid you
+can use your own after that," and it reverses the layers spec, which mints to
+the citing frame's TBA. That was right for licensing and is wrong here.
+Consequence to accept: selling a composition transfers no citations — a buyer
+who copies further owes on their own account.
+
+**A receipt covers the whole subtree.** Paying for frame 45 means frame 46 is
+yours too, alone, later, without paying again. What you bought was that branch.
+Without this, paying top-level and then reusing a piece would double-charge,
+and the buyer's-choice property collapses.
+
+So the check is "do I hold this frame *or any ancestor*" — a walk up the
+containment chain. Under Stage 1 that is cheap: `ownerOf` gives the parent
+directly, and the walk is bounded by depth, not by subtree size.
 
 ### What this collapses
 
-**No split cascade. No 0xSplits. No soulbound authorship root.**
+**No split cascade. No 0xSplits. No soulbound authorship root. No author-set
+precomputation.**
 
-That machinery exists to stop laundering — inserting a fake upstream claim to
-divert a percentage. There is no percentage to divert. Each author's cost is
-theirs and is paid directly, so there is nothing to route through anyone and
-nothing to launder.
+The cascade machinery exists to stop laundering — inserting a fake upstream
+claim to divert a percentage. There is no percentage. One frame, one author,
+one direct payment.
 
-What remains is simpler: a copied frame must record **which (framework, author)
-pair it came from**, so that a later copy of *your* framework can enumerate
-whose work is inside it. Not a root pointer for splitting — a provenance tag
-for enumeration.
+What remains is small: a copied frame records **which frame it came from**, so
+provenance is legible and so the ancestor walk has something to walk. Not a
+root pointer for splitting — a provenance tag.
 
 ### Amend the layers spec
 
 `frameworks-onchain-layers-spec.md` needs three corrections, all in §3–§5:
 
-1. **§5's per-node walk** becomes a per-(framework, author) enumeration. Only
-   `f` frames exist, so there is no node to charge for; and charging per node
-   would make copying a large structure by one author absurdly expensive for no
-   reason that maps to authorship.
-2. **§4's split cascade** is deleted. Superseded by direct payment per author.
-3. **§3's receipt target** changes from citing-frame-TBA to buyer wallet.
+1. **§5's per-node walk** is deleted. You pay once, for the frame you grabbed.
+   There is no walk and nothing to sum.
+2. **§4's split cascade** is deleted. Superseded by one direct payment to the
+   frame's author.
+3. **§3's receipt target** changes from citing-frame-TBA to buyer wallet, and
+   a receipt covers the cited frame's whole subtree.
 
 The spec's core claim survives intact and is in fact strengthened: receipts key
 on a specific minted frame, not a content hash, so two authors who independently
 write identical bytes are two independent citations. That is still exactly right.
 
-### The engineering problem: enumerating authors
-
-To sum costs you must know the distinct `(framework, author)` pairs inside what
-is being copied. On-chain traversal of an arbitrary subtree is unbounded gas.
-
-**Precompute the author set at mint.** A frame's author set is its own author
-plus the union of its children's. Composition is additive-only, so the set is
-fixed at creation and cheap to maintain incrementally — no traversal at copy
-time, just a stored set to read.
-
-This is the main implementation risk in Stage 2 and worth prototyping before
-committing to the rest.
-
 ### Decisions still open
 
-- **Setting `cost`.** Per author globally, or per (framework, author)? The rule
-  above implies the latter — an author might price two frameworks differently.
-- **Changing `cost` after the fact.** Does it affect prior citations? It should
-  not — a citation already paid is settled.
-- **Zero cost.** Must be expressible; many authors will want reach over income.
+- **Default cost.** "Gas to mint the copy" is a moving number and not knowable
+  at price-setting time. Either quote it at copy time from the subtree size, or
+  make the default a flat floor. Needs a call.
+- **Cost currency.** ETH, or a token? ETH is simplest and matches the tip
+  framing.
+- **Where cost lives.** A `cost[frameId]` mapping on the contract, or a
+  component frame under a `CTX_COST` slot? The second is more consistent with
+  "everything is a frame" and lets cost itself be read through a context.
 
 ### Done when
 
 - Copying your own work is free
-- Copying one author's framework charges once; copying a framework containing
-  three authors charges three times, each paid directly
-- Copying the same (framework, author) pair again is free, in any composition
-- Default cost with no `cost` set is the gas to mint the copied tokens
+- Copying someone else's frame charges its cost, paid directly to its author
+- Paying for a frame gets you everything inside it — reusing an interior frame
+  alone later is free
+- Copying the same frame again is free, in any composition
+- Changing a cost does not affect citations already paid
+- Zero cost works end to end: the citation happens, the receipt mints
 - An event exists that an indexer can use to build "who has cited me"
 
 ---

@@ -239,7 +239,7 @@ never merge.
 |---|---|---|
 | **Containment** | ERC-721 + ERC-6551 | framework → what it holds |
 | **Citation** | EAS attestation | framework → framework, declarative |
-| **Copy** | ERC-1155 | reader → (framework, author), paid |
+| **Copy** | ERC-1155 | reader → frame, paid once, covers the subtree |
 
 ### Containment
 
@@ -297,21 +297,33 @@ papers cite studies; nobody is buying a licence.
 
 ### What it costs
 
-**Per framework, per author.**
+**Every frame has a cost, and you pay at the level you grab.**
 
-- The default is **the gas to mint the copied tokens** — you pay what it costs
-  to exist, not rent. Authors opt into charging more by setting a cost.
-- Two frameworks by the same author is two payments. Same author, different
-  work, different citation.
-- One framework containing three authors' work is three payments — one to each,
-  directly. Nothing is split, nothing routes through anyone.
-- **Once you've paid for a framework, it's yours.** Use it in any composition
-  of yours, any number of times, forever. The citation belongs to you, not to
-  the piece of work you first put it in.
+Copy a whole framework and you pay that framework's cost — and you get
+everything inside it. Copy one component from within it and you pay that
+component's cost instead. There's no adding up, no per-frame tally. One price
+for the thing you took.
 
-The unit is the intersection: what you're citing is *this author's contribution
-to this framework*. If their work appears in two frameworks, that's two things
-to cite — the same way citing an author's two papers is two citations.
+- The default is **the gas to mint the copy** — you pay what it costs to exist,
+  not rent. Authors set a cost when they want one.
+- **Zero is allowed**, and will be common. Plenty of people want reach more
+  than income. At zero the citation still happens and the link is still real —
+  the fee was never what made it mean something.
+- **Changing a cost is never retroactive.** A citation already paid is settled.
+  Prices are safe to change; no debt appears behind you.
+- **Once you've paid for a frame, it's yours** — in any composition, any number
+  of times, forever, including the frames inside it. The citation belongs to
+  you, not to the piece of work you first put it in.
+
+This makes cost a decision about a *bounded thing*. Setting a price on a frame
+prices "this, and everything it contains" — so the boundaries you draw with
+`f`/`F` are also your price points. Wrapping something is deciding it's a unit
+someone can buy.
+
+And it puts granularity in the reader's hands. Want the whole framework? Pay
+the top. Want the one part you actually need? Go in and take that, cheaper.
+It's how citation already works: you cite the paper, or you cite one figure
+from it, and you don't owe separately for every sentence.
 
 ### The boundary rule
 
@@ -414,9 +426,10 @@ determines what a string means
 **containment** — holding; implemented as one framework's account owning
 another framework's token
 
-**copy** — pulling a framework into yours; free within your own work, paid per
-(framework, author) when the work is someone else's. Citation, not licensing:
-once paid, it's yours to reuse anywhere
+**copy** — pulling a framework into yours; free within your own work, and when
+it's someone else's you pay the cost of the frame you grabbed, which covers
+everything inside it. Citation, not licensing: once paid, it's yours to reuse
+anywhere, forever
 
 **contents** — the information a frame holds, stored as a content hash
 
