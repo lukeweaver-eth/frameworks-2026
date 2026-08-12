@@ -76,14 +76,14 @@ contract FrameworksRenderer {
         bytes memory json = abi.encodePacked(
             '{"name":"', title,
             '","description":"An on-chain Frameworks composition. ',
-            Strings.toString(frameworks.componentCount(id)),
+            Strings.toString(_frameCount(id)),
             ' frames, cast from ',
             Strings.toString(bytes(cmd).length),
             ' characters.',
             '","animation_url":"', generateHtml(title, cmd),
             '","attributes":[',
                 '{"trait_type":"Frames","value":',
-                    Strings.toString(frameworks.componentCount(id)), '},',
+                    Strings.toString(_frameCount(id)), '},',
                 '{"trait_type":"Characters","value":',
                     Strings.toString(bytes(cmd).length), '},',
                 '{"trait_type":"Command Set","value":',
@@ -109,12 +109,29 @@ contract FrameworksRenderer {
     /// @notice The names of a composition's frames, in order.
     /// @dev    What makes this legible rather than only viewable: the
     ///         semantic content is readable without running anything.
+    /// @dev A frame's own name frame lives *inside* it — `name()` mints it
+    ///      there, which is right: a name is a frame like everything else.
+    ///      But it is not a component of the composition in the sense that
+    ///      matters here, so skip it. Without this, naming a composition adds
+    ///      a phantom "" to its list of frames.
+    ///
+    ///      Skipping by identity (whatever `CTX_CALLED` points at) rather than
+    ///      by position, since nothing guarantees where in the order it lands.
     function frameNames(uint256 id) external view returns (string[] memory names) {
         uint256 n = frameworks.componentCount(id);
-        names = new string[](n);
         uint256 slot = frameworks.CTX_CALLED();
+        uint256 own = frameworks.context(id, slot);   // this frame's name frame
+
+        uint256[] memory kids = new uint256[](n);
+        uint256 k;
         for (uint256 i; i < n; ++i) {
-            uint256 called = frameworks.context(frameworks.componentAt(id, i), slot);
+            uint256 child = frameworks.componentAt(id, i);
+            if (child != own) kids[k++] = child;
+        }
+
+        names = new string[](k);
+        for (uint256 i; i < k; ++i) {
+            uint256 called = frameworks.context(kids[i], slot);
             names[i] = called == 0 ? "" : _toString(frameworks.contents(called));
         }
     }
@@ -178,6 +195,12 @@ contract FrameworksRenderer {
     // =========================================================================
     // Internal
     // =========================================================================
+
+    /// @dev Components, not counting this frame's own name frame.
+    function _frameCount(uint256 id) internal view returns (uint256) {
+        uint256 n = frameworks.componentCount(id);
+        return frameworks.context(id, frameworks.CTX_CALLED()) == 0 ? n : n - 1;
+    }
 
     function _nameOf(uint256 id) internal view returns (string memory) {
         uint256 called = frameworks.context(id, frameworks.CTX_CALLED());

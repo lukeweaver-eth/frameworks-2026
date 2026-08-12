@@ -92,7 +92,7 @@ gas hit; revisit if it bites.
 ### Done ✓ — deployed 2026-08-11
 
 `FrameworksV2` at `0x1d136e21e3D595b08010647b0F8D65d1766f0Ad1`, renderer at
-`0x7035935FEc29aE4F4B545f9453EFe0f3CE61fe25`. See `DEPLOYMENT.md`.
+`0x57122C3b744E398833ece6EdD612749b664E2f9E`. See `DEPLOYMENT.md`.
 
 All three gaps closed, verified live. `containerOf` costs 2,115 gas at 46
 frames — constant, via a reverse index written once per mint.
@@ -114,12 +114,10 @@ frames — constant, via a reverse index written once per mint.
 
 ### Left over
 
-- **`browse.html` still reads V1.** Point it at V2 and walk containment via
-  `containerOf`/`ownerOf`.
-- **A composition's name frame is one of its own components.** `name()` mints
-  it inside the composition, so `frameNames()` returns a trailing `""`. A name
-  is a context, not a part — it should live outside the component list, or
-  `frameNames` should skip whatever `CTX_CALLED` points at.
+- ~~`browse.html` reads V1~~ — now reads V2, and shows what V2 can answer:
+  what a frame is `inside`, its own account, and author ≠ owner.
+- ~~name frame leaks into `frameNames`~~ — the renderer now skips it by
+  identity, in both the name list and the `Frames` count.
 - ~~V2 unverified~~ — verified on Etherscan, along with its renderer.
 
 ---

@@ -52,7 +52,7 @@
 
 <div id="rail">
   <h1>Frameworks</h1>
-  <div class="sub">0x5ae53901…830b880f<br>sepolia</div>
+  <div class="sub">V2 · 0x1d136e21…766f0Ad1<br>sepolia · containment is ownership</div>
   <div id="status">loading…</div>
   <div id="list"></div>
 </div>
@@ -60,8 +60,10 @@
 <div id="main"><div id="detail" class="sub">select a frame</div></div>
 
 <script>
-const ADDR = '0x5ae53901f5a39528ac4bc8e8cba54deb830b880f';
-const REND = '0x281C60Fafa8eaDCdfa16d58e919a1e3507eFA140';
+// FrameworksV2 — frames are ERC-721s with token-bound accounts, so
+// containment is ownership. See DEPLOYMENT.md.
+const ADDR = '0x1d136e21e3D595b08010647b0F8D65d1766f0Ad1';
+const REND = '0x57122C3b744E398833ece6EdD612749b664E2f9E';
 const RPC  = 'https://ethereum-sepolia-rpc.publicnode.com';
 
 const FW_ABI = [
@@ -72,6 +74,9 @@ const FW_ABI = [
   'function componentCount(uint256) view returns (uint256)',
   'function componentAt(uint256,uint256) view returns (uint256)',
   'function author(uint256) view returns (address)',
+  'function ownerOf(uint256) view returns (address)',
+  'function accountOf(uint256) view returns (address)',
+  'function containerOf(uint256) view returns (uint256)',
 ];
 const RD_ABI = [
   'function frameNames(uint256) view returns (string[])',
@@ -148,8 +153,9 @@ async function show(id, btn) {
   d.className = ''; d.innerHTML = 'reading…';
 
   const f = frames.find(x => x.id === id);
-  const [author, cmdSet, nComp] = await Promise.all([
+  const [author, cmdSet, nComp, owner, account, container] = await Promise.all([
     fw.author(id), fw.context(id, CTX_COMMAND_SET), fw.componentCount(id),
+    fw.ownerOf(id), fw.accountOf(id), fw.containerOf(id),
   ]);
 
   const kids = await batch(Array.from({length:Number(nComp)},(_,i)=>i),
@@ -157,10 +163,30 @@ async function show(id, btn) {
   const kidNames = await batch(kids, k => fw.context(k, CTX_CALLED)
       .then(c => c === 0n ? fw.contents(k).then(v => '“'+b32(v)+'”') : fw.contents(c).then(b32)));
 
+  const short = a => a.slice(0,6) + '…' + a.slice(-4);
+
   let html = `<div class="row"><span class="k">frame</span><span class="v">#${id}`
-    + (f?.name ? ` — <b style="color:var(--accent)">${f.name}</b>` : '') + `</span></div>`
-    + `<div class="row"><span class="k">author</span><span class="v">${author}</span></div>`
-    + `<div class="row"><span class="k">components</span><span class="v">${nComp}</span></div>`;
+    + (f?.name ? ` — <b style="color:var(--accent)">${f.name}</b>` : '') + `</span></div>`;
+
+  // Containment is ownership: a nested frame is owned by its container's
+  // token-bound account. Show both, and the frame that account belongs to.
+  html += container !== 0n
+    ? `<div class="row"><span class="k">inside</span><span class="v">`
+      + `<a href="#" onclick="show(${container});return false">#${container}</a>`
+      + `<span class="badge">owned by its account ${short(owner)}</span></span></div>`
+    : `<div class="row"><span class="k">inside</span>`
+      + `<span class="v">nothing — held by ${short(owner)}</span></div>`;
+
+  html += `<div class="row"><span class="k">its account</span>`
+        + `<span class="v">${account}<span class="badge">holds its components</span></span></div>`;
+
+  // author is set at mint and survives transfer; ownerOf moves when sold.
+  // Stage 2 pays author, never ownerOf.
+  html += `<div class="row"><span class="k">author</span><span class="v">${author}`
+        + (author.toLowerCase() !== owner.toLowerCase()
+            ? `<span class="badge">≠ owner — credit stays put</span>` : ``)
+        + `</span></div>`
+        + `<div class="row"><span class="k">components</span><span class="v">${nComp}</span></div>`;
 
   if (cmdSet !== 0n)
     html += `<div class="row"><span class="k">command set</span><span class="v">`

@@ -5,7 +5,7 @@
 | What | Address |
 |---|---|
 | FrameworksV2 | `0x1d136e21e3D595b08010647b0F8D65d1766f0Ad1` |
-| FrameworksRenderer (V2) | `0x7035935FEc29aE4F4B545f9453EFe0f3CE61fe25` |
+| FrameworksRenderer (V2) | `0x57122C3b744E398833ece6EdD612749b664E2f9E` |
 | 6551 Registry | `0x000000006551c19487814612e58FE06813775758` |
 | Account impl (Tokenbound V3) | `0x41C8f39463A868d3A88af00cd0fe7102F30E44eC` |
 
@@ -20,18 +20,20 @@
 ```
 
 Verified live: `ownerOf(46)` is 45's account, `containerOf(46)` is 45,
-`frameNames(45)` is `["ART","NETWORK","KNOWLEDGE",""]`, and `uri(45)` renders
-as **"a space to think in"** — V1 had no way to name a composition.
+`frameNames(45)` is `["ART","NETWORK","KNOWLEDGE"]`, and `uri(45)` renders as
+**"a space to think in"** — V1 had no way to name a composition.
 
 Two things worth knowing:
 
 - **The renderer needed no code change.** `componentCount`/`componentAt` have
   the same signatures in V2; they resolve through `accountOf` internally. Only
   a redeploy pointed at the new address.
-- **The trailing `""` in `frameNames`** is the composition's own name frame,
-  which `name()` mints *inside* the composition. So a composition's name shows
-  up as one of its components. Works, but the modelling is off — a name is a
-  context, not a part. See ROADMAP.
+- **A composition's name frame is one of its own components.** `name()` mints
+  it inside the composition, which is right — a name is a frame like anything
+  else. But it is not a *part* of the composition, so the renderer skips it by
+  identity (whatever `CTX_CALLED` points at) in both `frameNames` and the
+  `Frames` count. Fixed in the renderer, not the contract: the storage is
+  correct, the reading was wrong.
 
 ## V1 — superseded, still live
 
