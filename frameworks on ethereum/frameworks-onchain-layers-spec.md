@@ -1,5 +1,16 @@
 # Frameworks: containment, citation, transclusion — interface sketch
 
+> **Superseded in part.** §3–§5 below describe a *licensing* model: receipts
+> minted to the citing frame's account, and a split cascade routing a fraction
+> upstream via 0xSplits. That is not the model. The system is **citation, not
+> licensing** — cost is per `(framework, author)`, each author is paid
+> directly with no splitting, and receipts belong to the buyer's wallet, so a
+> paid citation is theirs to reuse anywhere forever. Default cost is the gas
+> to mint the copied tokens.
+>
+> See `ROADMAP.md` § Stage 2 for the current model and the three specific
+> corrections. §1, §2, and the collision argument in §3 stand unchanged.
+
 Three separable layers. Each owns a distinct piece of state and a distinct
 relationship. They compose but never merge.
 

@@ -22,7 +22,7 @@ Four stages. Each is independently shippable and leaves a working system.
 | Stage | What it adds | Unblocks |
 |---|---|---|
 | **1. Frames are tokens** | ERC-721 + 6551 | ownership, containment, transfer, display |
-| **2. Copy costs something** | ERC-1155 receipts + splits | the whole economic model |
+| **2. Citation costs something** | ERC-1155 receipts, per (framework, author) | the whole economic model |
 | **3. Frames are visible** | on-chain preview, enumeration | wallets, marketplaces, discovery |
 | **4. Contexts do more than draw** | statechart context | the "systems as structures" claim |
 
@@ -99,67 +99,136 @@ gas hit; revisit if it bites.
 
 ---
 
-## Stage 2 — Copy costs something
+## Stage 2 — Citation costs something
 
-**Goal:** the boundary rule from `what-frameworks-is.md` — free inside your
-own work, paid across an authorship boundary — actually enforced.
+**Goal:** free inside your own work, paid when you pull in someone else's —
+enforced, and priced per author whose work you actually used.
 
-### The pieces
+### This is citation, not licensing
 
-**Authorship roots.** Each frame carries `isAuthorshipRoot` and
-`authorshipRoot`, set at mint and **never reassignable**. This is what the
-split cascade anchors to, and it must be independent of `ownerOf` — otherwise
-selling a framework silently reassigns credit for everything inside it. The
-spec flags this as an open item; it is the single subtlest thing in Stage 2.
+The distinction decides the whole design, so state it first.
 
-**Receipts (ERC-1155).**
+A licence is permission you need. A citation is a link you *want*, because the
+connection is the value. Nobody cites a paper to obtain permission — they cite
+it because being connected to that work is worth something to them.
 
-```solidity
-id = keccak256(abi.encode(citedFrameContract, citedTokenId))
+This matters because **you can always just retype the content yourself**. Under
+a licensing model that is a hole in the scheme: people route around the fee.
+Under a citation model it is the point. Retyping gives you the same bytes and
+none of the connection. The frame you copied is *someone's*, and the link says
+so.
 
-transclude(citingContract, citingId, citedContract, citedId) payable
-  1. citingTBA = tbaOf(citingContract, citingId)
-  2. if balanceOf(citingTBA, id) > 0  → free, already licensed
-  3. else → take payment, run the cascade, mint 1 to citingTBA
+So the fee is not payment for access. It is the cost of making the edge real —
+a tip, a token, the gesture of attribution having a price so that it means
+something. Scientific papers cite studies; nobody is buying a licence.
+
+### The rule
+
+**Cost is per (framework, author).**
+
+```
+copying a framework costs:
+    gas to mint the new tokens                        ← the default
+  + cost[author] for each distinct (framework, author)
+    pair present in what you copied
 ```
 
-Minted to the *citing frame's TBA*, not the wallet, so the license travels
-with the work rather than the person. Pay once per (citing, cited) pair;
-re-cite free.
+- Default cost is **the gas to mint those tokens** — the baseline is "you pay
+  what it costs to exist," not rent. Authors opt into charging by setting
+  `cost`.
+- Two frameworks by the same author = two payments. Same author, different
+  work, different citation.
+- One framework containing three authors' work = three payments, one to each.
+  **Not** a fraction split upstream — separate payments, no dilution.
+- **Once you have paid for a (framework, author) pair, it is yours.** Use it in
+  any composition of yours, any number of times, forever.
 
-**Split cascade.** On first copy of a given frame, route a fraction upstream
-to `authorshipRoot`, recursively via 0xSplits. Because the root is soulbound,
-a reference chain can't be laundered by inserting a fake upstream claim.
+The unit is the intersection: what you are citing is *this author's
+contribution to this framework*. If their work appears in two frameworks, that
+is two things to cite — exactly as citing an author's two papers is two
+citations.
 
-### The correction this repo already made
+### Receipts belong to the buyer, not the work
 
-`frameworks-onchain-layers-spec.md` §5 says deep duplicate walks every node
-and fires the cascade **per node**. That contradicts `what-frameworks-is.md`,
-which prices per *authorship boundary crossed*.
+```solidity
+id = keccak256(abi.encode(frameworkContract, frameworkId, author))
 
-Resolve in favor of boundary-crossing, and amend §5. Reasons: it matches the
-storage model (only `f` frames exist, so there is no node to charge for), it
-keeps `d` a free keystroke while composing, and cost scales with how much of
-other people's work you pulled in — which is what "amount of authored content
-recreated" was reaching for.
+cite(frameworkContract, frameworkId) payable
+  1. authors = authorSet(frameworkContract, frameworkId)
+  2. for each (framework, author) pair not already held by msg.sender:
+        require payment of cost[pair]
+        pay author directly
+        mint 1 receipt of `id` to msg.sender
+  3. pairs already held → free
+```
 
-Two documents in the same directory currently disagree about this. Fix before
-implementing.
+Receipts mint to **`msg.sender`'s wallet**, not the citing frame's account.
+This follows directly from "once you've paid you can use your own after that":
+the citation travels with *you*, not with the work.
 
-### Decisions to make first
+This reverses the layers spec, which mints to the citing frame's TBA so the
+licence travels with the work. That was the right call for licensing and is the
+wrong one here. Consequence to accept: selling a composition transfers no
+citations — a buyer who copies further owes on their own account.
 
-- **Who sets the price?** Spec leaves it open. Keep it in a swappable policy
-  contract so fixed-price / author-set / free are all reachable without
-  redeploying the receipt contract.
-- **What fraction routes upstream?** Needs a number. Suggest starting flat and
-  simple.
+### What this collapses
+
+**No split cascade. No 0xSplits. No soulbound authorship root.**
+
+That machinery exists to stop laundering — inserting a fake upstream claim to
+divert a percentage. There is no percentage to divert. Each author's cost is
+theirs and is paid directly, so there is nothing to route through anyone and
+nothing to launder.
+
+What remains is simpler: a copied frame must record **which (framework, author)
+pair it came from**, so that a later copy of *your* framework can enumerate
+whose work is inside it. Not a root pointer for splitting — a provenance tag
+for enumeration.
+
+### Amend the layers spec
+
+`frameworks-onchain-layers-spec.md` needs three corrections, all in §3–§5:
+
+1. **§5's per-node walk** becomes a per-(framework, author) enumeration. Only
+   `f` frames exist, so there is no node to charge for; and charging per node
+   would make copying a large structure by one author absurdly expensive for no
+   reason that maps to authorship.
+2. **§4's split cascade** is deleted. Superseded by direct payment per author.
+3. **§3's receipt target** changes from citing-frame-TBA to buyer wallet.
+
+The spec's core claim survives intact and is in fact strengthened: receipts key
+on a specific minted frame, not a content hash, so two authors who independently
+write identical bytes are two independent citations. That is still exactly right.
+
+### The engineering problem: enumerating authors
+
+To sum costs you must know the distinct `(framework, author)` pairs inside what
+is being copied. On-chain traversal of an arbitrary subtree is unbounded gas.
+
+**Precompute the author set at mint.** A frame's author set is its own author
+plus the union of its children's. Composition is additive-only, so the set is
+fixed at creation and cheap to maintain incrementally — no traversal at copy
+time, just a stored set to read.
+
+This is the main implementation risk in Stage 2 and worth prototyping before
+committing to the rest.
+
+### Decisions still open
+
+- **Setting `cost`.** Per author globally, or per (framework, author)? The rule
+  above implies the latter — an author might price two frameworks differently.
+- **Changing `cost` after the fact.** Does it affect prior citations? It should
+  not — a citation already paid is settled.
+- **Zero cost.** Must be expressible; many authors will want reach over income.
 
 ### Done when
 
-- Copying your own frame is free; copying another author's takes payment
-- A second copy of the same (citing, cited) pair is free
-- Selling a composition does not change who its frames' payments route to
-- An event exists that an indexer can use to build "who has copied me"
+- Copying your own work is free
+- Copying one author's framework charges once; copying a framework containing
+  three authors charges three times, each paid directly
+- Copying the same (framework, author) pair again is free, in any composition
+- Default cost with no `cost` set is the gas to mint the copied tokens
+- An event exists that an indexer can use to build "who has cited me"
 
 ---
 
@@ -243,7 +312,8 @@ further architecture substitutes for it.
 - **Reproducible builds.** Neither deployed contract can be rebuilt from this
   repo (different projects, different solc). Fix before mainnet — see
   `DEPLOYMENT.md`.
-- **Reconcile the two specs.** §5 of the layers spec vs. the boundary rule.
+- **Amend the layers spec** — §5's per-node cascade, §4's 0xSplits, and §3's
+  receipt target are all superseded by the citation model in Stage 2.
 - **Name compositions.** `compose` has no name param and no path to one.
 - **Contents > 32 bytes.** Decide where the bytes behind a hash live.
 - **`CTX_CHAR`.** Either use it or delete it; it is declared and never bound.

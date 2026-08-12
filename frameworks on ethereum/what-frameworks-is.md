@@ -239,7 +239,7 @@ never merge.
 |---|---|---|
 | **Containment** | ERC-721 + ERC-6551 | framework → what it holds |
 | **Citation** | EAS attestation | framework → framework, declarative |
-| **Copy** | ERC-1155 | framework → framework, paid |
+| **Copy** | ERC-1155 | reader → (framework, author), paid |
 
 ### Containment
 
@@ -278,28 +278,53 @@ the space you're working in. When what you're copying is your own, that's free.
 When it's someone else's, you pay. One verb, one gesture, and the price depends
 only on whose work it is.
 
-You pay once per (your framework, their framework) pair. What you get back is a
-receipt — a token proving the license. After that, copying it again is free.
-The receipt is minted to your framework's account, not your wallet, so the
-license travels with the work rather than the person.
+### It's citation, not licensing
 
-Payment splits automatically upstream: if the framework you copied was itself
-derived from something, a fraction routes to that origin, recursively.
-Authorship is anchored at the root and can't be reassigned, so the chain can't
-be laundered.
+This is the part that decides everything else about how copying works.
+
+A licence is permission you need. A citation is a link you *want*, because the
+connection is the value. Nobody cites a paper to obtain permission — they cite
+it because being connected to that work is worth something.
+
+Which is why it doesn't matter that **you could always just retype the content
+yourself**. If this were licensing, that would be a hole in the scheme. It
+isn't. Retyping gives you the same words and none of the connection. The frame
+you copied is *someone's*, and the link says so.
+
+The fee isn't payment for access. It's the cost of making the edge real — a
+tip, a token, attribution having a price so that it means something. Scientific
+papers cite studies; nobody is buying a licence.
+
+### What it costs
+
+**Per framework, per author.**
+
+- The default is **the gas to mint the copied tokens** — you pay what it costs
+  to exist, not rent. Authors opt into charging more by setting a cost.
+- Two frameworks by the same author is two payments. Same author, different
+  work, different citation.
+- One framework containing three authors' work is three payments — one to each,
+  directly. Nothing is split, nothing routes through anyone.
+- **Once you've paid for a framework, it's yours.** Use it in any composition
+  of yours, any number of times, forever. The citation belongs to you, not to
+  the piece of work you first put it in.
+
+The unit is the intersection: what you're citing is *this author's contribution
+to this framework*. If their work appears in two frameworks, that's two things
+to cite — the same way citing an author's two papers is two citations.
 
 ### The boundary rule
 
 Copying inside your own framework is free — you're arranging your own material,
 and `d` is one keystroke.
 
-Copying in someone else's framework costs — you're crossing an authorship
-boundary.
+Copying in someone else's framework costs — you're crossing into work that
+isn't yours.
 
 This is the whole economic model, and it's why the boundaries you draw with
 `f`/`F` matter. The unit of authorship is the framework you bounded and
-published. Cost scales with how many other people's work you pulled in, not
-with how many frames you made.
+published. Cost scales with whose work you pulled in, not with how many frames
+you made.
 
 ---
 
@@ -389,8 +414,9 @@ determines what a string means
 **containment** — holding; implemented as one framework's account owning
 another framework's token
 
-**copy** — pulling a framework into yours; free within your own work, paid
-across an authorship boundary
+**copy** — pulling a framework into yours; free within your own work, paid per
+(framework, author) when the work is someone else's. Citation, not licensing:
+once paid, it's yours to reuse anywhere
 
 **contents** — the information a frame holds, stored as a content hash
 
