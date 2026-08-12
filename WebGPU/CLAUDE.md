@@ -13,7 +13,11 @@ No build step. All files are standalone HTML or plain JS modules. Open in Chrome
 - **`frameworks-v4-mint.html`** — local builder. Has ethers CDN, wallet connect, Mint panel. Never uploaded to EthFS. **This is the source of truth** — edit here, then derive the viewer.
 - **`frameworks-v4.1-mint.html`** — next mainnet version in progress. Same architecture as `frameworks-v4-mint.html` but with features not yet deployed (context renderer, etc.). Will become the source of truth for the next deploy cycle (`frameworks_4.1.min.html`).
 - **`frameworks-v4-viewer.html`** — on-chain artifact. **Do not edit directly.** Derived from mint via `deploy/script/derive-viewer.py`. Full interactivity (all keyboard commands, command bar, export) minus chain-interaction buttons, wallet, and PNG export. Wrapped in an IIFE.
-- Minified output (~68KB) is what gets uploaded to EthFS. The renderer contract serves this to token holders.
+- **`frameworks-v5-mint.html`** — v4.1 plus the command set as data. The keymap is no longer a switch statement: `PRIMITIVES` (35 named operations, hardcoded) and `GENESIS_COMMAND_SET` (42 `{char, primitive}` bindings, data) are compiled into a dispatch table, and `loadCommandSet()` swaps the bindings at runtime. On startup it fetches the set from the Frameworks contract on Sepolia. **v4.1 is unchanged and is still what to use with the Frames collection.**
+- **`frameworks-v5-viewer.html`** — derived from v5 via `deploy/script/derive-viewer-v5.py`. Same as the v4 viewer plus a v5-only pass that strips the chain read (no ethers CDN there, so `fetchCommandSet` could never run). **The builder reads its command set from chain; the artifact pins the one it was derived against.**
+- Minified output (~68KB for v4, ~110KB for v5) is what gets uploaded to EthFS. The renderer contract serves this to token holders.
+
+See `../frameworks on ethereum/DEPLOYMENT.md` for the deployed Frameworks + renderer addresses, the frame map, and the reproducibility caveat.
 
 `frameworks-3.1.3-combined.js` is the V3 reference implementation (Three.js-based). `modules/` contains minified V3 modules for drop-in reuse.
 
@@ -72,6 +76,8 @@ GPU render: drawIndexedIndirect → vertex shader reads basis → mat3x3 transfo
 
 Frame geometry: 4 crosshatch line-quads (16 vertices, 24 indices) rendered as triangles. Line width is world-space. 4× MSAA is enabled on the render pipeline to fix aliasing.
 
+**Hung view pipeline:** A second render pipeline (`hvPipeline`) draws textured quads for hung views. Each hung view has a frozen 1024×1024 texture, a per-instance storage buffer (world-space basis from the parent frame), and its own bind group with a sampler + texture. The `HUNG_VIEW_SHADER` positions a 4-vertex quad using the frame's world-space basis and samples the frozen texture. Drawn after crosshatch frames and cursor in the same render pass.
+
 ### Context / Command System
 
 All keyboard input routes through a modal context system. The active context consumes `ijkl` for its purpose; non-handled keys exit the context and re-dispatch to normal mode.
@@ -81,6 +87,7 @@ Normal mode → t/T → TranslateContext (ijkl moves frames/cursor)
             → s/S → ScaleContext (i/k scales)
             → p   → ColorContext (ijkl navigates 8×10 palette grid, p applies)
             → v   → CameraContext (ijkl orbits, 0-6 presets)
+            → V   → captureHungView (freeze current view as textured picture frame)
             → u   → CommandTreeContext (ijkl navigates 2D fork tree)
             → #   → SelectionContext (bracket input [1,5,9])
             → m   → AnimationContext (ijkl direction/speed)
@@ -100,6 +107,8 @@ Command strings record every keypress. The notation `(dR,3)` means repeat `dR` t
 - `selectAllOfColor()` / `invertSelection()` / `selectAll()`
 - `shiftSelectedColors(shift, paletteSize)`
 - `getDirtyRange()` / `clearDirty()` — partial GPU upload tracking
+- `findByFrameId(id)` — linear scan, returns array index or -1
+- `snapshot()` / `loadSnapshot(snap)` — deep copy/restore of entire store (data buffer + metadata), used for hung view context entry/exit
 
 ### `ARCHITECTURE.md`
 Full module breakdown for the planned modular refactor (`gpu/`, `core/`, `camera/`, `commands/`, `contexts/`, `ui/`). Reference this when splitting the step HTML files into separate modules. **Note:** `ARCHITECTURE.md` predates the 64-byte full-basis layout — it describes the old 48-byte normal+roll layout. The data model section in this CLAUDE.md is authoritative.
@@ -113,6 +122,44 @@ Full design spec for the context renderer MVP and phase roadmap. Key points:
 - MVP: `ContextRenderer` class (~100 lines), mode indicator (7 frames always visible), palette swatch (11 frames when color context active) — one draw call total, no DOM changes
 - Long-term: context definitions become on-chain frame data (recursive self-hosting). Every near-term architecture decision should be compatible with this.
 - Phase roadmap: MVP → full palette grid (Phase 3) → selection strip (4) → camera context (5) → command history (6) → keyboard context (7) → data-driven (8) → on-chain (9)
+
+## Hung Views (V key)
+
+Hung views freeze a 3D composition into a 2D textured picture frame that lives in a larger 3D space. The projection chain is: **3D composition → camera projection → 2D texture → quad in meta-3D → screen**.
+
+### How it works
+
+1. **`V` press:** Snapshots the current FrameStore and camera. Wraps all frames in the current context into a new superframe (like `F`). Renders the pre-wrap snapshot into a frozen 1024×1024 texture via a one-shot offscreen render pass (separate command encoder, temporary buffers, cleaned up immediately). Animates camera zooming out (600ms cubic ease-in-out).
+
+2. **Parent-space rendering:** The wrapped children are hidden from crosshatch rendering (`scale=0` in world buffer via memoized ancestor walk in `computeWorldTransforms`). The hung view frame renders as a textured quad instead — positioned by its world-space basis, textured with the frozen snapshot.
+
+3. **`ck` to enter:** Animates camera zooming toward the picture (500ms). On completion, saves the current store (`snapshot()`), loads the frozen snapshot (`loadSnapshot()`), and restores the captured interior camera. You can navigate freely inside the 3D composition.
+
+4. **`ci` to exit:** Restores the parent store from the context stack's `savedStore`, saves the interior camera back to the frame's `localCamera` metadata.
+
+5. **Duplication:** `d` on a selected hung view deep-copies the frame + children and creates a new `hungViews` entry sharing the same GPU texture (different instance buffer / bind group). The `isHungView` metadata flag is preserved through duplication.
+
+### Key data structures
+
+- **`hungViews[]`** (GPU scope): array of `{ frameId, texture, instanceBuf, bindGroup, storeSnapshot, cameraSnapshot }`. One entry per hung view. Instance buffer updated each frame from world transforms.
+- **Frame metadata `isHungView`:** boolean flag on the superframe's metadata entry. Controls hidden-child logic in `computeWorldTransforms` and triggers textured quad rendering.
+- **Context stack entry `savedStore`:** frozen store snapshot, set when entering a hung view via `ck`. Restored on `ci`.
+
+### Callbacks (executor → GPU scope)
+
+- `onCaptureView(frameId, storeSnapshot, cameraSnapshot)` — triggers offscreen render-to-texture
+- `onGetHungView(frameId)` — returns the hung view entry for context entry
+- `onDuplicateHungView(srcFrameId, newFrameId)` — clones GPU resources for a duplicated hung view
+
+### CameraTransition
+
+`CameraTransition` class provides smooth lerp between camera states (theta, phi, dist, target, fov) over a configurable duration with cubic ease-in-out. Used for hung view enter/exit animations. Updated each frame in the render loop; during transition, `cameraContext.fov` is overridden by the interpolated value.
+
+### Known limitations
+
+- **Performance:** Each hung view's hidden children still exist in the store and are processed by `computeWorldTransforms` (set to scale=0). Three compositions noticeably drops fps. Future optimization: skip world transform computation entirely for hidden subtrees.
+- **Texture size:** Fixed at 1024×1024 regardless of content or display size.
+- **No re-capture:** Editing frames inside a hung view (via `ck`) does not update the frozen texture. The picture shows the state at capture time.
 
 ## Critical Gotchas
 
@@ -195,17 +242,57 @@ forge script script/DeployRenderer.s.sol --rpc-url $ETH_RPC_URL --private-key $P
 Next Sepolia deploy: bump to `frameworks_v4_viewer_v19.min.html`, renderer index 24. EthFS filenames v4–v11 are burned (failed attempts).
 Next mainnet deploy: bump to `frameworks_4.1.min.html`.
 
+### V5 — the Frameworks contract (separate from the Frames collection)
+
+V5 does not use the Mint protocol. It has its own contract and renderer, both
+live and verified on Sepolia. See `../frameworks on ethereum/DEPLOYMENT.md`.
+
+```
+Frameworks          0x5ae53901f5a39528ac4bc8e8cba54deb830b880f
+FrameworksRenderer  0x281C60Fafa8eaDCdfa16d58e919a1e3507eFA140
+EthFS file          frameworks_v5_viewer_v1.min.html  (112 KB, 6 chunks)
+```
+
+Pipeline — v5 copies, so the v4 scripts are untouched:
+
+```bash
+python3 deploy/script/derive-viewer-v5.py     # 21 sanity checks
+node    deploy/script/minify-viewer-v5.mjs
+node    deploy/script/upload-to-ethfs-v5.mjs
+forge script script/DeployFrameworksRenderer.s.sol --broadcast
+```
+
+Two traps worth knowing:
+
+- **EthFS address.** Use `0xFe1411d6864592549AdE050215482e4385dFa0FB` — the one
+  `upload-to-ethfs.mjs` writes to and the deployed V4 reads from. The
+  `0x8FAA1AAb…` address in the root-level `FrameworksRendererV4.sol` is a
+  different contract; both have code on Sepolia, so a renderer pointed at the
+  wrong one deploys fine and fails at read time.
+- **Don't use ScriptyBuilder for the v5 viewer.** `getEncodedHTML` reverts on a
+  112 KB complete HTML document. Read EthFS directly and inject
+  `autoExecuteCommand` before `</head>`, which is what the working V4 does.
+
 See `deploy/REDEPLOY.md` for full deployment history and versioning steps.
 
 ### Critical: Pre-deploy checklist (verify before every upload)
 
 Two bugs that silently pass locally but break in the on-chain iframe proxy:
 
-1. **`palette` must be declared before `paletteBuf`** — check with:
+1. **`palette` must not be *used* before it is declared** (TDZ).
+
+   The old form of this check compared `const palette` against the first
+   `paletteBuf` line and required palette to be lower. That is a **false
+   positive** — `paletteBuf` is an unrelated GPU buffer that is legitimately
+   created earlier, and the check fails on the deployed, working v4 viewer.
+   Check for a real TDZ instead: no JS use of bare `palette` above its
+   declaration (CSS selectors like `#palette-grid` don't count).
+
    ```bash
-   grep -n "const palette\b" frameworks-v4-viewer.html | head -1
-   grep -n "paletteBuf" frameworks-v4-viewer.html | head -1
-   # palette line number must be LOWER
+   DECL=$(grep -n "const palette\b" frameworks-v5-viewer.html | head -1 | cut -d: -f1)
+   awk -v d="$DECL" 'NR<d && /[^a-zA-Z_.]palette[^a-zA-Z_(]/ {print NR": "$0}' \
+     frameworks-v5-viewer.html
+   # any JS (non-CSS) hit is a real TDZ bug
    ```
 
 2. **Script must be wrapped in an IIFE** — the proxy loads the HTML twice in the same window scope. Without it, `Identifier 'CommandExecutor' has already been declared`.
@@ -234,15 +321,19 @@ Frame lines are expanded as world-space quads (`lp.z, lp.w` perp offset in the v
 ## Remaining Work
 
 - **Context renderer MVP** — `ContextRenderer` class, second pipeline, mode indicator + palette swatch. See `Context Design/contexts-design.md` for full spec.
+- **Hung view performance** — skip `computeWorldTransforms` for subtrees under hung view frames; currently all hidden children are still processed each frame.
+- **Hung view re-capture** — allow updating the frozen texture after editing the interior (re-render snapshot on exit or on demand).
+- **Hung view texture resolution** — adaptive sizing based on frame scale or viewport, instead of fixed 1024×1024.
 - Modular refactor: extract `gpu/`, `core/`, `camera/`, `commands/`, `contexts/` per `ARCHITECTURE.md`
 - Save/load (URL hash, localStorage, command string export)
 - On-chain command string storage (mint protocol)
 
 ### Local-only features (not yet deployed onchain)
 
-These exist in `frameworks-v4-mint.html` but are NOT in the live onchain artifact (`frameworks_4.0.min.html`). They will be included in mainnet v2 (`frameworks_4.1.min.html`):
+These exist in `frameworks-v4-mint.html` / `frameworks-v4.1-mint.html` but are NOT in the live onchain artifact (`frameworks_4.0.min.html`). They will be included in mainnet v2 (`frameworks_4.1.min.html`):
 - Sketch log + commitments history (two-row command bar)
 - `/` command overlay with n-repeat
 - Command compression (net axis cancellation, repeat notation)
 - Copy ↑ button (appends compressed sketch to commit field)
+- **Hung views (`V` key)** — freeze 3D compositions into 2D textured picture frames, navigate in/out with `ck`/`ci`, duplicate with `d`, animated camera transitions
 - Planned: `~` loop notation and `.` step-pause notation for animated command playback
