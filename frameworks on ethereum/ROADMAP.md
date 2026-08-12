@@ -89,13 +89,38 @@ gas hit; revisit if it bites.
   current deployment as v0 and keep it as a reference. Recommendation:
   redeploy. Genesis is 44 mints and one transaction.
 
-### Done when
+### Done ✓ — deployed 2026-08-11
 
-- `ownerOf(46)` returns frame 45's TBA
-- Transferring frame 45 moves the whole subtree with it (its TBA still owns 46–48)
-- `Gaps.t.sol` fails — all three gaps closed
-- The renderer's `frameNames(45)` still returns `["ART","NETWORK","KNOWLEDGE"]`
-- `browse.html` walks containment via `ownerOf` instead of `componentAt`
+`FrameworksV2` at `0x1d136e21e3D595b08010647b0F8D65d1766f0Ad1`, renderer at
+`0x7035935FEc29aE4F4B545f9453EFe0f3CE61fe25`. See `DEPLOYMENT.md`.
+
+All three gaps closed, verified live. `containerOf` costs 2,115 gas at 46
+frames — constant, via a reverse index written once per mint.
+
+**Three things the build surfaced that this plan did not anticipate:**
+
+- **`_safeMint` reverts into an undeployed TBA.** The address is deterministic
+  and valid before the account exists, but `_safeMint` calls
+  `onERC721Received` and there is no code there to answer. Use `_mint` when
+  nesting. Otherwise nesting costs an account deployment and `compose` cannot
+  mint a second level.
+- **Authority must follow the root, not `ownerOf`.** A nested frame's human
+  owner does not appear in `ownerOf` at all — its container's account does.
+  `rootOwnerOf()` walks to the top. The consequence, accepted: selling an
+  outer frame hands over authority for everything inside it.
+- **Authorship must be stored separately.** `author[]` is set at mint and
+  survives transfer. Stage 2 pays it, never `ownerOf` — otherwise selling a
+  framework silently reassigns credit and payment for everything in it.
+
+### Left over
+
+- **`browse.html` still reads V1.** Point it at V2 and walk containment via
+  `containerOf`/`ownerOf`.
+- **A composition's name frame is one of its own components.** `name()` mints
+  it inside the composition, so `frameNames()` returns a trailing `""`. A name
+  is a context, not a part — it should live outside the component list, or
+  `frameNames` should skip whatever `CTX_CALLED` points at.
+- ~~V2 unverified~~ — verified on Etherscan, along with its renderer.
 
 ---
 
