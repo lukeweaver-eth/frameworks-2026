@@ -126,15 +126,18 @@ something. Scientific papers cite studies; nobody is buying a licence.
 
 **Cost is per frame. You pay at the level you grab.**
 
-```
+```solidity
+uint256 constant DEFAULT_COST = 0.00001 ether;   // provisional
+
 copying frame X costs:  cost[X]        ← one lookup. that's all.
                                           you get X and everything inside it.
 ```
 
 Four rules, and they are the whole model:
 
-1. **Cost is a property of a frame**, set by its author. Default is the gas to
-   mint the copy — you pay what it costs to exist, not rent.
+1. **Cost is a property of a frame**, set by its author. Default is
+   **0.00001 ETH** — a flat token amount, chosen so the gesture costs
+   something and nothing else. Provisional; easy to change.
 2. **You pay for what you grabbed, and get everything it contains.** Copy the
    top-level framework, pay its cost, receive the whole subtree. Copy one
    component, pay that component's cost. There is no summing.
@@ -228,14 +231,18 @@ write identical bytes are two independent citations. That is still exactly right
 
 ### Decisions still open
 
-- **Default cost.** "Gas to mint the copy" is a moving number and not knowable
-  at price-setting time. Either quote it at copy time from the subtree size, or
-  make the default a flat floor. Needs a call.
-- **Cost currency.** ETH, or a token? ETH is simplest and matches the tip
-  framing.
+- ~~**Default cost.**~~ Settled: a flat **0.00001 ETH**, in ETH. Chosen over
+  "gas to mint the copy" because gas is not knowable when a price is set and
+  would make the same frame cost different amounts on different days.
+  Provisional — revisit once there is real usage to price against.
 - **Where cost lives.** A `cost[frameId]` mapping on the contract, or a
   component frame under a `CTX_COST` slot? The second is more consistent with
-  "everything is a frame" and lets cost itself be read through a context.
+  "everything is a frame" and lets cost itself be read through a context — at
+  the price of a lookup on every copy. Worth deciding deliberately; it is the
+  kind of thing that gets settled by accident.
+- **Distinguishing unset from zero.** `cost[id] == 0` cannot mean both "author
+  never set one" (→ default) and "author set it free" (→ actually free). Needs
+  either a sentinel or an `isSet` flag. Small, and easy to get wrong.
 
 ### Done when
 
@@ -245,7 +252,9 @@ write identical bytes are two independent citations. That is still exactly right
   alone later is free
 - Copying the same frame again is free, in any composition
 - Changing a cost does not affect citations already paid
-- Zero cost works end to end: the citation happens, the receipt mints
+- A frame whose author never set a cost charges 0.00001 ETH
+- Zero cost works end to end and is distinguishable from unset: the citation
+  happens, the receipt mints, nothing is charged
 - An event exists that an indexer can use to build "who has cited me"
 
 ---

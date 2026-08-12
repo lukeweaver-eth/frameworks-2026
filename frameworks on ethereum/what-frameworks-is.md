@@ -304,8 +304,8 @@ everything inside it. Copy one component from within it and you pay that
 component's cost instead. There's no adding up, no per-frame tally. One price
 for the thing you took.
 
-- The default is **the gas to mint the copy** — you pay what it costs to exist,
-  not rent. Authors set a cost when they want one.
+- The default is **0.00001 ETH** — small enough to be a gesture rather than a
+  toll. Authors set their own cost when they want one.
 - **Zero is allowed**, and will be common. Plenty of people want reach more
   than income. At zero the citation still happens and the link is still real —
   the fee was never what made it mean something.

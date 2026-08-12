@@ -11,7 +11,8 @@
 > One payment, straight to that frame's author. No summing, no walk, no
 > splitting. Receipts belong to the buyer's wallet and cover the cited frame's
 > whole subtree, so a paid citation is theirs to reuse anywhere, forever.
-> Changing a cost is never retroactive, and zero cost is allowed.
+> Default cost is a flat 0.00001 ETH. Changing a cost is never retroactive,
+> and zero cost is allowed.
 >
 > See `ROADMAP.md` § Stage 2 for the current model and the three specific
 > corrections. §1, §2, and the collision argument in §3 stand unchanged.
